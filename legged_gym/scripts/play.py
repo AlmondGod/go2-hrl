@@ -11,8 +11,12 @@ from legged_gym.utils import  get_args, export_policy_as_jit, task_registry, Log
 import numpy as np
 import torch
 
+from legged_gym.utils import webviewer
+
 
 def play(args):
+    web_viewer = webviewer.WebViewer()
+
     env_cfg, train_cfg = task_registry.get_cfgs(name=args.task)
     # override some parameters for testing
     env_cfg.env.num_envs = min(env_cfg.env.num_envs, 100)
@@ -27,11 +31,17 @@ def play(args):
 
     # prepare environment
     env, _ = task_registry.make_env(name=args.task, args=args, env_cfg=env_cfg)
+
+    web_viewer.setup(env)
+
+
     obs = env.get_observations()
     # load policy
     train_cfg.runner.resume = True
     ppo_runner, train_cfg = task_registry.make_alg_runner(env=env, name=args.task, args=args, train_cfg=train_cfg)
     policy = ppo_runner.get_inference_policy(device=env.device)
+
+    print("initialized policy")
     
     # export policy as a jit module (used to run it from C++)
     if EXPORT_POLICY:
@@ -40,8 +50,17 @@ def play(args):
         print('Exported policy as jit script to: ', path)
 
     for i in range(10*int(env.max_episode_length)):
+
+        print("stepping")
         actions = policy(obs.detach())
         obs, _, rews, dones, infos = env.step(actions.detach())
+
+        print(f"obs: {obs}")
+        
+        web_viewer.render(fetch_results=True,
+                        step_graphics=True,
+                        render_all_camera_sensors=True,
+                        wait_for_page_load=True)
 
 if __name__ == '__main__':
     EXPORT_POLICY = True
