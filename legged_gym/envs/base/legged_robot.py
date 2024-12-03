@@ -232,13 +232,26 @@ class LeggedRobot(BaseTask):
         self.gym.refresh_rigid_body_state_tensor(self.sim)
         self.gym.refresh_force_sensor_tensor(self.sim)
 
+        # Update robot and sphere root states
+        self.robot_root_states = self.root_states[self.robot_actor_indices, :]
+        self.sphere_root_states = self.root_states[self.sphere_actor_indices, :]
+
         self.episode_length_buf += 1
         self.common_step_counter += 1
 
+<<<<<<< Updated upstream
         # prepare quantities
         self.base_quat[:] = self.root_states[:, 3:7]
         self.base_lin_vel[:] = quat_rotate_inverse(self.base_quat, self.root_states[:, 7:10])
         self.base_ang_vel[:] = quat_rotate_inverse(self.base_quat, self.root_states[:, 10:13])
+=======
+        # prepare quantities using robot root states
+        self.base_pos[:] = self.robot_root_states[:, 0:3]
+        self.base_quat[:] = self.robot_root_states[:, 3:7]
+        self.rpy[:] = get_euler_xyz_in_tensor(self.base_quat[:])
+        self.base_lin_vel[:] = quat_rotate_inverse(self.base_quat, self.robot_root_states[:, 7:10])
+        self.base_ang_vel[:] = quat_rotate_inverse(self.base_quat, self.robot_root_states[:, 10:13])
+>>>>>>> Stashed changes
         self.projected_gravity[:] = quat_rotate_inverse(self.base_quat, self.gravity_vec)
         self.base_lin_acc = (self.root_states[:, 7:10] - self.last_root_vel[:, :3]) / self.dt
 
@@ -257,6 +270,7 @@ class LeggedRobot(BaseTask):
         self.compute_reward()
         env_ids = self.reset_buf.nonzero(as_tuple=False).flatten()
         self.reset_idx(env_ids)
+<<<<<<< Updated upstream
 
         self.cur_goals = self._gather_cur_goals()
         self.next_goals = self._gather_cur_goals(future=1)
@@ -269,6 +283,13 @@ class LeggedRobot(BaseTask):
         self.last_dof_vel[:] = self.dof_vel[:]
         self.last_torques[:] = self.torques[:]
         self.last_root_vel[:] = self.root_states[:, 7:13]
+=======
+        self.compute_observations()  # in some cases a simulation step might be required to refresh some obs (for example body positions)
+
+        self.last_actions[:] = self.actions[:]
+        self.last_dof_vel[:] = self.dof_vel[:]
+        self.last_root_vel[:] = self.robot_root_states[:, 7:13]
+>>>>>>> Stashed changes
 
         if self.viewer and self.enable_viewer_sync and self.debug_viz:
             self.gym.clear_lines(self.viewer)
@@ -547,7 +568,9 @@ class LeggedRobot(BaseTask):
     def _post_physics_step_callback(self):
         """ Callback called before computing terminations, rewards, and observations
             Default behaviour: Compute ang vel command based on target and heading, compute measured terrain heights and randomly push robots
+            ADDED: update sphere positions
         """
+<<<<<<< Updated upstream
         # 
         env_ids = (self.episode_length_buf % int(self.cfg.commands.resampling_time / self.dt)==0)
         self._resample_commands(env_ids.nonzero(as_tuple=False).flatten())
@@ -562,6 +585,63 @@ class LeggedRobot(BaseTask):
             if self.global_counter % self.cfg.depth.update_interval == 0:
                 self.measured_heights = self._get_heights()
         if self.cfg.domain_rand.push_robots and  (self.common_step_counter % self.cfg.domain_rand.push_interval == 0):
+=======
+        env_ids = (self.episode_length_buf % int(self.cfg.commands.resampling_time / self.dt) == 0).nonzero(as_tuple=False).flatten()
+        self._resample_commands(env_ids)
+
+        # Define target foot positions in robot's local frame
+        target_foot_positions_robot_frame = torch.tensor(
+            [
+                [0.2, 0.1, -0.5],   # Front right foot
+                [0.2, -0.1, -0.5],  # Front left foot
+                [-0.2, 0.1, -0.5],  # Rear right foot
+                [-0.2, -0.1, -0.5],  # Rear left foot
+            ], device=self.device)
+
+        # Expand to match the number of environments
+        target_foot_positions_robot_frame = target_foot_positions_robot_frame.unsqueeze(0).repeat(self.num_envs, 1, 1)
+
+        # Get robot positions and orientations
+        robot_positions = self.robot_root_states[:, 0:3]   # (num_envs, 3)
+        robot_orientations = self.robot_root_states[:, 3:7]  # (num_envs, 4)
+
+        # Compute rotated positions
+        q = robot_orientations.unsqueeze(1).repeat(1, 4, 1).reshape(-1, 4)
+        v = target_foot_positions_robot_frame.reshape(-1, 3)
+        rotated_positions = quat_rotate(q, v).view(self.num_envs, 4, 3)
+
+        # Compute target positions in world frame
+        sphere_positions_world = robot_positions.unsqueeze(1) + rotated_positions
+
+        # Update sphere root states
+        self.sphere_root_states[:, :, 0:3] = sphere_positions_world
+        self.sphere_root_states[:, :, 3:7] = torch.tensor(
+            [0, 0, 0, 1], device=self.device).repeat(self.num_envs, 4, 1)
+        self.sphere_root_states[:, :, 7:13] = 0.0  # Zero velocities
+
+        # Update root states in the main tensor
+        self.root_states[:, 1:, :] = self.sphere_root_states
+
+        # Flatten root_states and compute actor indices
+        flat_root_states = self.root_states.view(-1, 13)
+        sphere_actor_indices = (torch.arange(self.num_envs, device=self.device).unsqueeze(1) * self.num_actors_per_env + torch.arange(1, self.num_actors_per_env, device=self.device)).reshape(-1)
+
+        # Convert to int32
+        sphere_actor_indices_int32 = sphere_actor_indices.to(dtype=torch.int32)
+
+        self.gym.set_actor_root_state_tensor_indexed(self.sim,
+                                                    gymtorch.unwrap_tensor(flat_root_states),
+                                                    gymtorch.unwrap_tensor(sphere_actor_indices_int32),
+                                                    len(sphere_actor_indices_int32))
+        
+        # Existing code for command updates...
+        if self.cfg.commands.heading_command:
+            forward = quat_apply(self.base_quat, self.forward_vec)
+            heading = torch.atan2(forward[:, 1], forward[:, 0])
+            self.commands[:, 2] = torch.clip(0.5 * wrap_to_pi(self.commands[:, 3] - heading), -1., 1.)
+
+        if self.cfg.domain_rand.push_robots and (self.common_step_counter % self.cfg.domain_rand.push_interval == 0):
+>>>>>>> Stashed changes
             self._push_robots()
         
     def _gather_cur_goals(self, future=0):
@@ -622,19 +702,14 @@ class LeggedRobot(BaseTask):
         self.dof_pos[env_ids] = self.default_dof_pos + torch_rand_float(0., 0.9, (len(env_ids), self.num_dof), device=self.device)
         self.dof_vel[env_ids] = 0.
 
-        env_ids_int32 = env_ids.to(dtype=torch.int32)
+        env_ids_int32 = env_ids.to(dtype=torch.int32).to(self.device)
         self.gym.set_dof_state_tensor_indexed(self.sim,
-                                              gymtorch.unwrap_tensor(self.dof_state),
-                                              gymtorch.unwrap_tensor(env_ids_int32), len(env_ids_int32))
+                                            gymtorch.unwrap_tensor(self.dof_state),
+                                            gymtorch.unwrap_tensor(env_ids_int32), len(env_ids_int32))
+    
     def _reset_root_states(self, env_ids):
-        """ Resets ROOT states position and velocities of selected environmments
-            Sets base position based on the curriculum
-            Selects randomized base velocities within -0.5:0.5 [m/s, rad/s]
-        Args:
-            env_ids (List[int]): Environemnt ids
-        """
-        # base position
         if self.custom_origins:
+<<<<<<< Updated upstream
             self.root_states[env_ids] = self.base_init_state
             self.root_states[env_ids, :3] += self.env_origins[env_ids]
             if self.cfg.env.randomize_start_pos:
@@ -653,10 +728,33 @@ class LeggedRobot(BaseTask):
         else:
             self.root_states[env_ids] = self.base_init_state
             self.root_states[env_ids, :3] += self.env_origins[env_ids]
+=======
+            self.robot_root_states[env_ids] = self.base_init_state
+            self.robot_root_states[env_ids, :3] += self.env_origins[env_ids]
+            self.robot_root_states[env_ids, :2] += torch_rand_float(-1., 1., (len(env_ids), 2), device=self.device)
+        else:
+            self.robot_root_states[env_ids] = self.base_init_state
+            self.robot_root_states[env_ids, :3] += self.env_origins[env_ids]
+        # base velocities
+        self.robot_root_states[env_ids, 7:13] = torch_rand_float(-0.5, 0.5, (len(env_ids), 6), device=self.device)
+
+        # Update root states in the main tensor
+        self.root_states[env_ids, 0, :] = self.robot_root_states[env_ids, :]
+
+        # No need to get actor indices; use environment indices instead
+>>>>>>> Stashed changes
         env_ids_int32 = env_ids.to(dtype=torch.int32)
+
         self.gym.set_actor_root_state_tensor_indexed(self.sim,
-                                                     gymtorch.unwrap_tensor(self.root_states),
-                                                     gymtorch.unwrap_tensor(env_ids_int32), len(env_ids_int32))
+                                                    gymtorch.unwrap_tensor(self.root_states.view(-1, 13)),
+                                                    gymtorch.unwrap_tensor(env_ids_int32 * self.num_actors_per_env),
+                                                    len(env_ids_int32))
+
+        # Move env_ids to self.device if not already
+        env_ids = env_ids.to(self.device)
+        # Ensure self.robot_root_states and self.base_init_state are on the same device
+        self.robot_root_states = self.robot_root_states.to(self.device)
+        self.base_init_state = self.base_init_state.to(self.device)
 
     def _push_robots(self):
         """ Random pushes the robots. Emulates an impulse by setting a randomized base velocity. 
@@ -665,8 +763,14 @@ class LeggedRobot(BaseTask):
         self.root_states[:, 7:9] = torch_rand_float(-max_vel, max_vel, (self.num_envs, 2), device=self.device) # lin vel x/y
         self.gym.set_actor_root_state_tensor(self.sim, gymtorch.unwrap_tensor(self.root_states))
 
+<<<<<<< Updated upstream
     def _update_terrain_curriculum(self, env_ids):
         """ Implements the game-inspired curriculum.
+=======
+   
+    def update_command_curriculum(self, env_ids):
+        """ Implements a curriculum of increasing commands
+>>>>>>> Stashed changes
 
         Args:
             env_ids (List[int]): ids of environments being reset
@@ -713,6 +817,7 @@ class LeggedRobot(BaseTask):
             
         # create some wrapper tensors for different slices
         self.root_states = gymtorch.wrap_tensor(actor_root_state)
+<<<<<<< Updated upstream
         self.rigid_body_states = gymtorch.wrap_tensor(rigid_body_state_tensor).view(self.num_envs, -1, 13)
         self.dof_state = gymtorch.wrap_tensor(dof_state_tensor)
         self.dof_pos = self.dof_state.view(self.num_envs, self.num_dof, 2)[..., 0]
@@ -721,6 +826,26 @@ class LeggedRobot(BaseTask):
 
         self.force_sensor_tensor = gymtorch.wrap_tensor(force_sensor_tensor).view(self.num_envs, 4, 6) # for feet only, see create_env()
         self.contact_forces = gymtorch.wrap_tensor(net_contact_forces).view(self.num_envs, -1, 3) # shape: num_envs, num_bodies, xyz axis
+=======
+        self.num_actors = self.root_states.shape[0]
+        self.num_actors_per_env = 1 + 4  # 1 robot + 4 spheres
+
+        # Reshape root_states to [num_envs, num_actors_per_env, 13]
+        self.root_states = self.root_states.view(self.num_envs, self.num_actors_per_env, 13)
+
+        # Separate robot and sphere root states
+        self.robot_root_states = self.root_states[:, 0, :]        # Robots are the first actor in each env
+        self.sphere_root_states = self.root_states[:, 1:, :]      # Spheres are the next four actors
+
+        self.dof_state = gymtorch.wrap_tensor(dof_state_tensor)
+        self.dof_pos = self.dof_state.view(self.num_envs, self.num_dof, 2)[..., 0]
+        self.dof_vel = self.dof_state.view(self.num_envs, self.num_dof, 2)[..., 1]
+        self.base_quat = self.robot_root_states[:, 3:7]
+        self.rpy = get_euler_xyz_in_tensor(self.base_quat)
+        self.base_pos = self.robot_root_states[:, 0:3]
+        self.contact_forces = gymtorch.wrap_tensor(net_contact_forces).view(self.num_envs, -1, 3)
+    
+>>>>>>> Stashed changes
 
         # initialize some data used later on
         self.common_step_counter = 0
@@ -733,6 +858,7 @@ class LeggedRobot(BaseTask):
         self.actions = torch.zeros(self.num_envs, self.num_actions, dtype=torch.float, device=self.device, requires_grad=False)
         self.last_actions = torch.zeros(self.num_envs, self.num_actions, dtype=torch.float, device=self.device, requires_grad=False)
         self.last_dof_vel = torch.zeros_like(self.dof_vel)
+<<<<<<< Updated upstream
         self.last_torques = torch.zeros_like(self.torques)
         self.last_root_vel = torch.zeros_like(self.root_states[:, 7:13])
 
@@ -748,14 +874,22 @@ class LeggedRobot(BaseTask):
         self.commands = torch.zeros(self.num_envs, self.cfg.commands.num_commands, dtype=torch.float, device=self.device, requires_grad=False) # x vel, y vel, yaw vel, heading
         self._resample_commands(torch.arange(self.num_envs, device=self.device, requires_grad=False))
         self.commands_scale = torch.tensor([self.obs_scales.lin_vel, self.obs_scales.lin_vel, self.obs_scales.ang_vel], device=self.device, requires_grad=False,) # TODO change this
+=======
+        self.last_root_vel = torch.zeros_like(self.robot_root_states[:, 7:13])
+        self.commands = torch.zeros(self.num_envs, self.cfg.commands.num_commands, dtype=torch.float, device=self.device, requires_grad=False)  # x vel, y vel, yaw vel, heading
+        self.commands_scale = torch.tensor([self.obs_scales.lin_vel, self.obs_scales.lin_vel, self.obs_scales.ang_vel], device=self.device, requires_grad=False,)  # TODO change this
+>>>>>>> Stashed changes
         self.feet_air_time = torch.zeros(self.num_envs, self.feet_indices.shape[0], dtype=torch.float, device=self.device, requires_grad=False)
         self.last_contacts = torch.zeros(self.num_envs, len(self.feet_indices), dtype=torch.bool, device=self.device, requires_grad=False)
-        self.base_lin_vel = quat_rotate_inverse(self.base_quat, self.root_states[:, 7:10])
-        self.base_ang_vel = quat_rotate_inverse(self.base_quat, self.root_states[:, 10:13])
+        self.base_lin_vel = quat_rotate_inverse(self.base_quat, self.robot_root_states[:, 7:10])
+        self.base_ang_vel = quat_rotate_inverse(self.base_quat, self.robot_root_states[:, 10:13])
         self.projected_gravity = quat_rotate_inverse(self.base_quat, self.gravity_vec)
+<<<<<<< Updated upstream
         if self.cfg.terrain.measure_heights:
             self.height_points = self._init_height_points()
         self.measured_heights = 0
+=======
+>>>>>>> Stashed changes
 
         # joint positions offsets and PD gains
         self.default_dof_pos = torch.zeros(self.num_dof, dtype=torch.float, device=self.device, requires_grad=False)
@@ -777,6 +911,7 @@ class LeggedRobot(BaseTask):
                     print(f"PD gain of joint {name} were not defined, setting them to zero")
         self.default_dof_pos = self.default_dof_pos.unsqueeze(0)
 
+<<<<<<< Updated upstream
         self.default_dof_pos_all[:] = self.default_dof_pos[0]
 
         self.height_update_interval = 1
@@ -788,6 +923,8 @@ class LeggedRobot(BaseTask):
                                             self.cfg.depth.buffer_len, 
                                             self.cfg.depth.resized[1], 
                                             self.cfg.depth.resized[0]).to(self.device)
+=======
+>>>>>>> Stashed changes
 
     def _prepare_reward_function(self):
         """ Prepares a list of reward functions, whcih will be called to compute the total reward.
@@ -890,6 +1027,7 @@ class LeggedRobot(BaseTask):
 
     def _create_envs(self):
         """ Creates environments:
+             ADDED: creates target position visualizer spheres
              1. loads the robot URDF/MJCF asset,
              2. For each environment
                 2.1 creates the environment, 
@@ -897,6 +1035,18 @@ class LeggedRobot(BaseTask):
                 2.3 create actor with these properties and add them to the env
              3. Store indices of different bodies of the robot
         """
+
+        # Create a sphere asset for visualizing target foot positions
+        sphere_radius = 0.05  # Adjust the radius as needed
+        asset_options = gymapi.AssetOptions()
+        asset_options.fix_base_link = True  # Keep the sphere static
+        sphere_asset = self.gym.create_sphere(self.sim, sphere_radius, asset_options)
+
+        # Initialize lists to store sphere handles and actor indices
+        self.sphere_handles = []
+        self.sphere_actor_indices = []
+        self.robot_actor_indices = []
+
         asset_path = self.cfg.asset.file.format(LEGGED_GYM_ROOT_DIR=LEGGED_GYM_ROOT_DIR)
         asset_root = os.path.dirname(asset_path)
         asset_file = os.path.basename(asset_path)
@@ -986,6 +1136,26 @@ class LeggedRobot(BaseTask):
         
         self.friction_coeffs_tensor = self.friction_coeffs.to(self.device).to(torch.float).squeeze(-1)
 
+            # Create sphere actors for target foot positions
+            sphere_handles = []
+            sphere_actor_indices = []
+            for j in range(4):
+                sphere_pose = gymapi.Transform()
+                sphere_pose.p = gymapi.Vec3(0, 0, 0)  # Initial position; will be updated later
+                sphere_handle = self.gym.create_actor(
+                    env_handle, sphere_asset, sphere_pose, f"sphere_{i}_{j}", i, 0)
+                sphere_handles.append(sphere_handle)
+                sphere_actor_index = self.gym.get_actor_index(
+                    env_handle, sphere_handle, gymapi.DOMAIN_SIM)
+                sphere_actor_indices.append(sphere_actor_index)
+            self.sphere_handles.append(sphere_handles)
+            self.sphere_actor_indices.extend(sphere_actor_indices)
+
+            # Get robot actor index for later use
+            robot_actor_index = self.gym.get_actor_index(
+                env_handle, actor_handle, gymapi.DOMAIN_SIM)
+            self.robot_actor_indices.append(robot_actor_index)
+
         self.feet_indices = torch.zeros(len(feet_names), dtype=torch.long, device=self.device, requires_grad=False)
         for i in range(len(feet_names)):
             self.feet_indices[i] = self.gym.find_actor_rigid_body_handle(self.envs[0], self.actor_handles[0], feet_names[i])
@@ -998,6 +1168,7 @@ class LeggedRobot(BaseTask):
         for i in range(len(termination_contact_names)):
             self.termination_contact_indices[i] = self.gym.find_actor_rigid_body_handle(self.envs[0], self.actor_handles[0], termination_contact_names[i])
 
+<<<<<<< Updated upstream
         hip_names = ["FR_hip_joint", "FL_hip_joint", "RR_hip_joint", "RL_hip_joint"]
         self.hip_indices = torch.zeros(len(hip_names), dtype=torch.long, device=self.device, requires_grad=False)
         for i, name in enumerate(hip_names):
@@ -1011,6 +1182,14 @@ class LeggedRobot(BaseTask):
         for i, name in enumerate(calf_names):
             self.calf_indices[i] = self.dof_names.index(name)
     
+=======
+        # Convert lists to tensors for efficient computation
+        self.sphere_actor_indices = torch.tensor(
+            self.sphere_actor_indices, dtype=torch.long, device=self.device)
+        self.robot_actor_indices = torch.tensor(
+            self.robot_actor_indices, dtype=torch.long, device=self.device)
+
+>>>>>>> Stashed changes
     def _get_env_origins(self):
         """ Sets environment origins. On rough terrain the origins are defined by the terrain platforms.
             Otherwise create a grid.

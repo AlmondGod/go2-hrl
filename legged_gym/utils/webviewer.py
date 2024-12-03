@@ -196,6 +196,7 @@ class WebViewer:
             self._event_stream_depth.clear()
 
     def attach_view_camera(self, i, env_handle, actor_handle, root_pos):
+<<<<<<< Updated upstream
         if True:
             camera_props = gymapi.CameraProperties()
             camera_props.width = 960
@@ -208,7 +209,19 @@ class WebViewer:
             
             cam_pos = root_pos + np.array([0, 1, 0.5])
             self._gym.set_camera_location(camera_handle, env_handle, gymapi.Vec3(*cam_pos), gymapi.Vec3(*root_pos))
+=======
+        camera_props = gymapi.CameraProperties()
+        camera_props.width = 960
+        camera_props.height = 540
+        camera_props.enable_tensors = True
+>>>>>>> Stashed changes
 
+        camera_handle = self._gym.create_camera_sensor(env_handle, camera_props)
+        self._cameras.append(camera_handle)
+        
+        cam_pos = root_pos + np.array([0, 1, 0.5])
+        self._gym.set_camera_location(camera_handle, env_handle, gymapi.Vec3(*cam_pos), gymapi.Vec3(*root_pos))
+    
     def setup(self, env) -> None:
         """Setup the web viewer
 
@@ -228,7 +241,8 @@ class WebViewer:
         self._env = env
         self.cam_pos_rel = np.array([0, 2, 1])
         for i in range(self._env.num_envs):
-            root_pos = self._env.root_states[i, :3].cpu().numpy()
+            # Access the robot's root position
+            root_pos = self._env.root_states[i, 0, :3].cpu().numpy()
             self.attach_view_camera(i, self._envs[i], self._env.actor_handles[i], root_pos)
     
     def render(self,
@@ -299,10 +313,10 @@ class WebViewer:
             self._image_depth = self._env.depth_buffer[self._camera_id, -1].cpu().numpy() + 0.5
             self._image_depth = np.uint8(255 * self._image_depth)
         
-        root_pos = self._env.root_states[self._camera_id, :3].cpu().numpy()
+        root_pos = self._env.root_states[self._camera_id, 0, :3].cpu().numpy()
         cam_pos = root_pos + self.cam_pos_rel
         self._gym.set_camera_location(self._cameras[self._camera_id], self._envs[self._camera_id], gymapi.Vec3(*cam_pos), gymapi.Vec3(*root_pos))
-
+        
         # notify stream thread
         self._event_stream.set()
         if self._env.cfg.depth.use_camera:
