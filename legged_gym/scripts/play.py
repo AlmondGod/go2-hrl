@@ -32,6 +32,8 @@ def play(args):
     # prepare environment
     env, _ = task_registry.make_env(name=args.task, args=args, env_cfg=env_cfg)
 
+    env.debug_viz = True
+
     web_viewer.setup(env)
 
 
@@ -42,6 +44,14 @@ def play(args):
     policy = ppo_runner.get_inference_policy(device=env.device)
 
     print("initialized policy")
+
+    num_feet = len(env.feet_indices)
+    target_positions = torch.zeros((env.num_envs, num_feet, 3), device=env.device)
+    # Set some example target positions
+    for i in range(env.num_envs):
+        for j in range(num_feet):
+            target_positions[i, j] = torch.tensor([0.3 * (j-1), 0.2 * (j-1), 0], device=env.device)
+    env.update_target_positions(target_positions)
     
     # export policy as a jit module (used to run it from C++)
     if EXPORT_POLICY:
@@ -55,7 +65,7 @@ def play(args):
         actions = policy(obs.detach())
         obs, _, rews, dones, infos = env.step(actions.detach())
 
-        print(f"obs: {obs}")
+        # print(f"obs: {obs}")
         
         web_viewer.render(fetch_results=True,
                         step_graphics=True,

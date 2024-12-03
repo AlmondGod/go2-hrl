@@ -36,6 +36,7 @@ class LeggedRobot(BaseTask):
         self.sim_params = sim_params
         self.height_samples = None
         self.debug_viz = False
+        self.target_positions = None
         self.init_done = False
         self._parse_cfg(self.cfg)
         super().__init__(self.cfg, sim_params, physics_engine, sim_device, headless)
@@ -283,6 +284,13 @@ class LeggedRobot(BaseTask):
             forward = quat_apply(self.base_quat, self.forward_vec)
             heading = torch.atan2(forward[:, 1], forward[:, 0])
             self.commands[:, 2] = torch.clip(0.5*wrap_to_pi(self.commands[:, 3] - heading), -1., 1.)
+
+        if self.debug_viz and hasattr(self, 'viewer') and self.viewer is not None:
+            self._draw_debug_vis()
+            
+            # If you have target positions, visualize them
+            if self.target_positions is not None:
+                self._draw_target_positions(self.target_positions)
 
         if self.cfg.domain_rand.push_robots and  (self.common_step_counter % self.cfg.domain_rand.push_interval == 0):
             self._push_robots()
@@ -715,3 +723,88 @@ class LeggedRobot(BaseTask):
     def _reward_feet_contact_forces(self):
         # penalize high contact forces
         return torch.sum((torch.norm(self.contact_forces[:, self.feet_indices, :], dim=-1) -  self.cfg.rewards.max_contact_force).clip(min=0.), dim=1)
+
+    def _draw_debug_vis(self):
+        """ Add debug visualizations for waypoints and footsteps """
+        # Delete previous visualizations
+        self.gym.clear_lines(self.viewer)
+        
+        # Draw cross markers for foot positions
+        line_length = 0.1  # 10cm lines
+        colors = [[1., 0., 0.], [0., 1., 0.], [0., 0., 1.], [1., 1., 0.]]  # One color per foot
+        
+        for env_idx in range(self.num_envs):
+            # Get foot positions from the simulation
+            foot_positions = []
+            for foot_idx in self.feet_indices:
+                body_state = self.gym.get_rigid_body_state(self.envs[env_idx], 
+                                                        self.actor_handles[env_idx], 
+                                                        foot_idx)
+                foot_positions.append(body_state[:3])
+
+            # Draw crosses for each foot
+            for pos, color in zip(foot_positions, colors):
+                # Vertical line
+                self.gym.add_lines(self.viewer, 
+                                self.envs[env_idx],
+                                1,
+                                [pos[0], pos[1], pos[2] + line_length],
+                                [pos[0], pos[1], pos[2] - line_length],
+                                color)
+                
+                # Horizontal line
+                self.gym.add_lines(self.viewer, 
+                                self.envs[env_idx],
+                                1,
+                                [pos[0] + line_length, pos[1], pos[2]],
+                                [pos[0] - line_length, pos[1], pos[2]],
+                                color)
+                
+                # Forward-back line
+                self.gym.add_lines(self.viewer, 
+                                self.envs[env_idx],
+                                1,
+                                [pos[0], pos[1] + line_length, pos[2]],
+                                [pos[0], pos[1] - line_length, pos[2]],
+                                color)
+
+    def _draw_target_positions(self, target_positions, colors=None):
+        """Draw target positions for footsteps
+        
+        Args:
+            target_positions: Tensor of shape (num_envs, num_feet, 3) containing target positions
+            colors: Optional list of colors for each foot
+        """
+        if colors is None:
+            colors = [[1., 0., 0.], [0., 1., 0.], [0., 0., 1.], [1., 1., 0.]]
+        
+        line_length = 0.05  # 5cm lines
+        
+        for env_idx in range(self.num_envs):
+            for foot_idx in range(len(self.feet_indices)):
+                pos = target_positions[env_idx, foot_idx]
+                color = colors[foot_idx]
+                
+                # Vertical line
+                self.gym.add_lines(self.viewer, 
+                                self.envs[env_idx],
+                                1,
+                                [pos[0], pos[1], pos[2] + line_length],
+                                [pos[0], pos[1], pos[2] - line_length],
+                                color)
+                
+                # Horizontal line
+                self.gym.add_lines(self.viewer, 
+                                self.envs[env_idx],
+                                1,
+                                [pos[0] + line_length, pos[1], pos[2]],
+                                [pos[0] - line_length, pos[1], pos[2]],
+                                color)
+                
+    def update_target_positions(self, positions):
+        """Update the target positions for visualization
+        
+        Args:
+            positions: Tensor of shape (num_envs, num_feet, 3) containing target positions
+        """
+        self.target_positions = positions

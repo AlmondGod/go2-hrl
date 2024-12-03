@@ -38,7 +38,7 @@ def spherical_to_cartesian(r, theta, phi):
     return x, y, z
 
 class WebViewer:
-    def __init__(self, host: str = "127.0.0.1", port: int = 5000) -> None:
+    def __init__(self, host: str = "127.0.0.1", port: int = 5001) -> None:
         """
         Web viewer for Isaac Gym
 
