@@ -20,7 +20,9 @@ class LeggedRobotCfg(BaseConfig):
         static_friction = 1.0
         dynamic_friction = 1.0
         restitution = 0.
+
         # rough terrain only:
+        edge_width_thresh = 0.05
         measure_heights = True
         measured_points_x = [-0.8, -0.7, -0.6, -0.5, -0.4, -0.3, -0.2, -0.1, 0., 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8] # 1mx1.6m rectangle (without center line)
         measured_points_y = [-0.5, -0.4, -0.3, -0.2, -0.1, 0., 0.1, 0.2, 0.3, 0.4, 0.5]

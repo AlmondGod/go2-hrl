@@ -4,6 +4,7 @@ from scipy import interpolate
 
 from isaacgym import terrain_utils
 from legged_gym.envs.base.legged_robot_config import LeggedRobotCfg
+from scipy.ndimage import binary_dilation
 
 class Terrain:
     def __init__(self, cfg: LeggedRobotCfg.terrain, num_robots) -> None:
@@ -11,8 +12,8 @@ class Terrain:
         self.cfg = cfg
         self.num_robots = num_robots
         self.type = cfg.mesh_type
-        if self.type in ["none", 'plane']:
-            return
+        # if self.type in ["none", 'plane']:
+        #     return
         self.env_length = cfg.terrain_length
         self.env_width = cfg.terrain_width
         self.proportions = [np.sum(cfg.terrain_proportions[:i+1]) for i in range(len(cfg.terrain_proportions))]
@@ -36,11 +37,14 @@ class Terrain:
             self.randomized_terrain()   
         
         self.heightsamples = self.height_field_raw
-        if self.type=="trimesh":
-            self.vertices, self.triangles = terrain_utils.convert_heightfield_to_trimesh(   self.height_field_raw,
+        # if self.type=="trimesh":
+        self.vertices, self.triangles, self.x_edge_mask = terrain_utils.convert_heightfield_to_trimesh(   self.height_field_raw,
                                                                                             self.cfg.horizontal_scale,
                                                                                             self.cfg.vertical_scale,
                                                                                             self.cfg.slope_treshold)
+        half_edge_width = int(self.cfg.edge_width_thresh / self.cfg.horizontal_scale)
+        structure = np.ones((half_edge_width*2+1, 1))
+        self.x_edge_mask = binary_dilation(self.x_edge_mask, structure=structure)
     
     def randomized_terrain(self):
         for k in range(self.cfg.num_sub_terrains):
