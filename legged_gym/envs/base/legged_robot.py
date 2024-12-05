@@ -841,6 +841,23 @@ class LeggedRobot(BaseTask):
         reward = torch.exp(-total_distance / 0.1)  
         
         return reward
+    
+    # for base PPO encouraging x and y positive movement and same z (not falling into the void)
+    def _reward_xy_progress(self):
+        # Reward for making progress in x and y directions
+        # Get the change in position since last step
+        xy_vel = self.base_lin_vel[:, :2]  # Get x,y velocities
+        return torch.sum(xy_vel, dim=1)  # Sum the x and y velocities
+
+    def _reward_z_stability(self):
+        # Reward for maintaining target z height
+        # Get the current z position
+        z_pos = self.root_states[:, 2]
+        # Calculate distance from target height
+        z_target = self.cfg.init_state.pos[2]  # Use initial z position as target
+        z_diff = torch.abs(z_pos - z_target)
+        # Convert distance to reward (closer = higher reward)
+        return torch.exp(-z_diff * 10)  # Scale factor of 10 makes the reward more sensitive to height changes
 
     def _draw_debug_vis(self):
         """ Add debug visualizations for waypoints and footsteps """

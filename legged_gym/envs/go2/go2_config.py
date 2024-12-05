@@ -61,6 +61,10 @@ class GO2RoughCfg( LeggedRobotCfg ):
             # TODO: uncomment this to activate foot-target-distance-based reward
             # target_dists = 40.0
 
+            # TODO: comment this (this is for base PPO rewards)
+            xy_progress = 20.0
+            z_stability = 10.0
+
 class GO2RoughCfgPPO( LeggedRobotCfgPPO ):
     class algorithm( LeggedRobotCfgPPO.algorithm ):
         entropy_coef = 0.01
