@@ -42,8 +42,21 @@ class GO2RoughCfg( LeggedRobotCfg ):
         soft_dof_pos_limit = 0.9
         base_height_target = 0.25
         class scales( LeggedRobotCfg.rewards.scales ):
+            # Negative rewards (penalties)
             torques = -0.0002
             dof_pos_limits = -10.0
+            orientation = -2.0  # Penalize non-flat orientation
+            lin_vel_z = -2.0   # Penalize vertical movement
+            ang_vel_xy = -0.5  # Penalize angular velocity in xy plane
+            collision = -1.0   # Penalize collisions
+            
+            # Positive rewards
+            forward_vel = 40.0  # Strong reward for moving forward
+            tracking_lin_vel = 1.0  # Reward for tracking commanded velocity
+            feet_air_time = 1.0  # Reward for taking steps
+            
+            # Remove or reduce rewards that might conflict with forward movement
+            stand_still = 0.0  # Disable stand still reward
 
 class GO2RoughCfgPPO( LeggedRobotCfgPPO ):
     class algorithm( LeggedRobotCfgPPO.algorithm ):

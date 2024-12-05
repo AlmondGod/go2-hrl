@@ -771,6 +771,12 @@ class LeggedRobot(BaseTask):
         # penalize high contact forces
         return torch.sum((torch.norm(self.contact_forces[:, self.feet_indices, :], dim=-1) -  self.cfg.rewards.max_contact_force).clip(min=0.), dim=1)
 
+    def _reward_forward_vel(self):
+        # Get the forward velocity in the robot's local frame
+        forward_vel = self.base_lin_vel[:, 0]  # x-axis velocity
+        # Reward positive forward velocity
+        return torch.clamp(forward_vel, min=0.0)
+
     def _draw_debug_vis(self):
         """ Add debug visualizations for waypoints and footsteps """
         # Delete previous visualizations
