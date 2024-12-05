@@ -230,8 +230,8 @@ class LeggedRobot(BaseTask):
         self.terrain = Terrain(self.cfg.terrain, self.num_envs)
 
         # TODO: use either create_heightfield or create_trimesh, whichever works better with the Trajectory Optimizer
-        self._create_heightfield()
-        # self._create_trimesh()
+        # self._create_heightfield()
+        self._create_trimesh()
         self._create_envs()
 
     def set_camera(self, position, lookat):
