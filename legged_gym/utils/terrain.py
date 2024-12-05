@@ -45,8 +45,11 @@ class Terrain:
         half_edge_width = int(self.cfg.edge_width_thresh / self.cfg.horizontal_scale)
         structure = np.ones((half_edge_width*2+1, 1))
         self.x_edge_mask = binary_dilation(self.x_edge_mask, structure=structure)
-    
+
+        assert np.sum(cfg.terrain_proportions) == 1.0, "Terrain proportions must sum to 1.0"
+        
     def randomized_terrain(self):
+        print("Generating randomized terrain...")
         for k in range(self.cfg.num_sub_terrains):
             # Env coordinates in the world
             (i, j) = np.unravel_index(k, (self.cfg.num_rows, self.cfg.num_cols))
@@ -54,6 +57,7 @@ class Terrain:
             choice = np.random.uniform(0, 1)
             difficulty = np.random.choice([0.5, 0.75, 0.9])
             terrain = self.make_terrain(choice, difficulty)
+            print(f"Sub-terrain {k}: min height = {np.min(terrain.height_field_raw)}, max height = {np.max(terrain.height_field_raw)}")  # Debug print
             self.add_terrain_to_map(terrain, i, j)
         
     def curiculum(self):
@@ -159,3 +163,4 @@ def pit_terrain(terrain, depth, platform_size=1.):
     y1 = terrain.width // 2 - platform_size
     y2 = terrain.width // 2 + platform_size
     terrain.height_field_raw[x1:x2, y1:y2] = -depth
+

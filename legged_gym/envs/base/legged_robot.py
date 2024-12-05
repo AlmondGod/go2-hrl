@@ -228,8 +228,10 @@ class LeggedRobot(BaseTask):
         # TODO: write create_heightmap and create_triangle_meshes and run either (dont need to add mesh_type to cfg)
         mesh_type = self.cfg.terrain.mesh_type
         self.terrain = Terrain(self.cfg.terrain, self.num_envs)
-        # self._create_heightfield()
-        self._create_trimesh()
+
+        # TODO: use either create_heightfield or create_trimesh, whichever works better with the Trajectory Optimizer
+        self._create_heightfield()
+        # self._create_trimesh()
         self._create_envs()
 
     def set_camera(self, position, lookat):
@@ -552,21 +554,42 @@ class LeggedRobot(BaseTask):
         """ Adds a heightfield terrain to the simulation, sets parameters based on the cfg.
         """
         hf_params = gymapi.HeightFieldParams()
+
+        # Convert heightfield to the correct format
+        heightfield = self.terrain.height_field_raw.astype(np.int16)  # Ensure int16
+        
+        # Ensure the heightfield is in column-major order
+        heightfield = heightfield.T.copy()  
+        
+        # Set up parameters
         hf_params.column_scale = self.cfg.terrain.horizontal_scale
         hf_params.row_scale = self.cfg.terrain.horizontal_scale
         hf_params.vertical_scale = self.cfg.terrain.vertical_scale
-        print(f"self.terrain: {self.terrain}")
+        
+        # Set dimensions
+        hf_params.nbRows = self.terrain.tot_rows
+        hf_params.nbColumns = self.terrain.tot_cols
         hf_params.nbRows = self.terrain.tot_cols
         hf_params.nbColumns = self.terrain.tot_rows 
         hf_params.transform.p.x = -self.terrain.border
         hf_params.transform.p.y = -self.terrain.border
+
+        # Set transform
+        hf_params.transform.p.x = -self.terrain.cfg.border_size
+        hf_params.transform.p.y = -self.terrain.cfg.border_size
         hf_params.transform.p.z = 0.0
+        
+        # Set material properties
         hf_params.static_friction = self.cfg.terrain.static_friction
         hf_params.dynamic_friction = self.cfg.terrain.dynamic_friction
         hf_params.restitution = self.cfg.terrain.restitution
 
-        self.gym.add_heightfield(self.sim, self.terrain.heightsamples.flatten(order='C'), hf_params)
-        self.height_samples = torch.tensor(self.terrain.heightsamples).view(self.terrain.tot_rows, self.terrain.tot_cols).to(self.device)
+        print(f"Adding heightfield with shape: {heightfield.shape}")
+        print(f"Height range after scaling: {np.min(heightfield) * self.cfg.terrain.vertical_scale:.3f}m to {np.max(heightfield) * self.cfg.terrain.vertical_scale:.3f}m")
+        
+        # Add the heightfield
+        self.gym.add_heightfield(self.sim, heightfield.flatten(), hf_params)
+        self.height_samples = torch.tensor(heightfield).to(self.device)
 
     def _create_trimesh(self):
         """ Adds a triangle mesh terrain to the simulation, sets parameters based on the cfg.

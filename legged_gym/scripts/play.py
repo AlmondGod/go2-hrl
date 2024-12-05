@@ -60,12 +60,9 @@ def play(args):
         print('Exported policy as jit script to: ', path)
 
     for i in range(10*int(env.max_episode_length)):
-
-        print("stepping")
         actions = policy(obs.detach())
+        print("stepping")
         obs, _, rews, dones, infos = env.step(actions.detach())
-
-        # print(f"obs: {obs}")
         
         web_viewer.render(fetch_results=True,
                         step_graphics=True,
