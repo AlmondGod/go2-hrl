@@ -51,7 +51,7 @@ class GO2RoughCfg( LeggedRobotCfg ):
             collision = -1.0   # Penalize collisions
             
             # Positive rewards
-            forward_vel = 40.0  # Strong reward for moving forward
+            forward_vel = 10.0  # Strong reward for moving forward
             tracking_lin_vel = 1.0  # Reward for tracking commanded velocity
             feet_air_time = 1.0  # Reward for taking steps
             
@@ -62,8 +62,8 @@ class GO2RoughCfg( LeggedRobotCfg ):
             # target_dists = 40.0
 
             # TODO: comment this (this is for base PPO rewards)
-            xy_progress = 20.0
-            z_stability = 10.0
+            xy_progress = 10.0
+            z_stability = 4.0
 
 class GO2RoughCfgPPO( LeggedRobotCfgPPO ):
     class algorithm( LeggedRobotCfgPPO.algorithm ):
