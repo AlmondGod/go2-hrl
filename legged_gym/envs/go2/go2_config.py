@@ -58,6 +58,9 @@ class GO2RoughCfg( LeggedRobotCfg ):
             # Remove or reduce rewards that might conflict with forward movement
             stand_still = 0.0  # Disable stand still reward
 
+            # TODO: uncomment this to activate foot-target-distance-based reward
+            # target_dists = 40.0
+
 class GO2RoughCfgPPO( LeggedRobotCfgPPO ):
     class algorithm( LeggedRobotCfgPPO.algorithm ):
         entropy_coef = 0.01

@@ -37,7 +37,6 @@ class LeggedRobot(BaseTask):
         self.sim_params = sim_params
         self.height_samples = None
         self.debug_viz = False
-        self.target_positions = None
         self.init_done = False
         self._parse_cfg(self.cfg)
         super().__init__(self.cfg, sim_params, physics_engine, sim_device, headless)
@@ -48,7 +47,34 @@ class LeggedRobot(BaseTask):
         self._prepare_reward_function()
         self.init_done = True
 
+        self.trajectory = self.trajectory_optimizer()
+        # TODO: define how target positions is initialized
+        self.target_positions = self.calculate_target_positions()
+       
+    def trajectory_optimizer(self): #define other inputs 
+        """
+        inputs: current position, whatever yall want
+        outputs: a list of the foot position trajectories (should be 2D Array, each inner array is four foot positions)
+        """
+        # TODO: implement
+        # should run the trajectory optimizer at the beginning and maintain target positions along the trajectory (in some other function),
+        return None
+        
+    def calculate_target_positions(self):
+        """
+        inputs: none
+        outputs: next four target foot positions
+        this should only be called once the previous positions have been achieved (can add a check for this)
+        """
+        
+        # TODO: implement
+        # should just return the next array of four target foot positions in self.trajactory array
+        return None
+
     def step(self, actions):
+        # TODO: maintain self.target_positions 
+            # (if foot poses are within a small delta of target poses, then recalculate them otherwise they can stay the same)
+
         """ Apply actions, simulate, call self.post_physics_step()
 
         Args:
@@ -776,6 +802,22 @@ class LeggedRobot(BaseTask):
         forward_vel = self.base_lin_vel[:, 0]  # x-axis velocity
         # Reward positive forward velocity
         return torch.clamp(forward_vel, min=0.0)
+
+    def _reward_target_dists(self):
+        """
+        Rewards based on how close the current feet (foot_positions) are to target feet positions (self.target_positions)
+        """
+        foot_positions = self.rigid_body_states[:, self.feet_indices, :3]
+
+        distances = torch.norm(foot_positions - self.target_positions, dim=-1)  # shape (num_envs, num_feet)
+    
+        total_distance = torch.sum(distances, dim=1)  # shape (num_envs)
+        
+        # distance to reward (closer = higher reward)
+        # TODO: tune this (especially 0.1 scaling factor)
+        reward = torch.exp(-total_distance / 0.1)  
+        
+        return reward
 
     def _draw_debug_vis(self):
         """ Add debug visualizations for waypoints and footsteps """
