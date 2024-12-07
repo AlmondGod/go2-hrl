@@ -57,6 +57,8 @@ class LeggedRobot(BaseTask):
         outputs: a list of the foot position trajectories (should be 2D Array, each inner array is four foot positions)
         """
         # TODO: implement
+        # this is the heightfield:
+        heightfield = self.terrain.height_field_raw.astype(np.int16)
         # should run the trajectory optimizer at the beginning and maintain target positions along the trajectory (in some other function),
         return None
         
