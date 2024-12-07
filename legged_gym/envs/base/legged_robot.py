@@ -47,35 +47,30 @@ class LeggedRobot(BaseTask):
         self._prepare_reward_function()
         self.init_done = True
 
-        self.trajectory = self.trajectory_optimizer()
-        # TODO: define how target positions is initialized
-        self.target_positions = self.calculate_target_positions()
+        self.target_positions = self.trajectory_optimizer()
        
-    def trajectory_optimizer(self): #define other inputs 
+    def trajectory_optimizer(self): # TODO: define other inputs if desired
         """
         inputs: current position, whatever yall want
-        outputs: a list of the foot position trajectories (should be 2D Array, each inner array is four foot positions)
-        """
-        # TODO: implement
-        # this is the heightfield:
-        heightfield = self.terrain.height_field_raw.astype(np.int16)
-        # should run the trajectory optimizer at the beginning and maintain target positions along the trajectory (in some other function),
-        return None
-        
-    def calculate_target_positions(self):
-        """
-        inputs: none
-        outputs: next four target foot positions
+        outputs:next four target foot positions
         this should only be called once the previous positions have been achieved (can add a check for this)
         """
-        
         # TODO: implement
-        # should just return the next array of four target foot positions in self.trajactory array
+
+        # this is the heightfield:
+        heightfield = self.terrain.height_field_raw.astype(np.int16)
+
+        # The horizontal scale (distance between points) : (currently 0.1 m)
+        # The vertical scale (height multiplier) : (currently 0.005 m)
+        # both defined in legged_robot_config.py
+
         return None
 
     def step(self, actions):
         # TODO: maintain self.target_positions 
-            # (if foot poses are within a small delta of target poses, then recalculate them otherwise they can stay the same)
+            # (if foot poses are within a small delta of target poses, 
+            # then recalculate them by calling trajectory_optimizer(),
+            # otherwise they can stay the same)
 
         """ Apply actions, simulate, call self.post_physics_step()
 
