@@ -23,6 +23,7 @@ from fetch.tamols.constraints import add_initial_constraints, add_kinematic_cons
 from fetch.tamols.costs import add_tracking_cost, add_foothold_on_ground_cost, add_nominal_kinematic_cost, add_base_pose_alignment_cost, add_edge_avoidance_cost
 from fetch.tamols.map_processing import process_height_maps
 from pydrake.solvers import SnoptSolver
+from fetch.tamols.plotting_helpers import plot_optimal_solutions_interactive, save_optimal_solutions
 
 class LeggedRobot(BaseTask):
     def __init__(self, cfg: LeggedRobotCfg, sim_params, physics_engine, sim_device, headless):
@@ -128,11 +129,17 @@ class LeggedRobot(BaseTask):
         # Setup optimization variables
         setup_variables(tmls)
 
+        # Temp constraint
+        for leg_idx, pos in enumerate([[0.4, 0.1, 0], [0.4, -0.1, 0], [0, 0.1, 0], [0, -0.1, 0]]):
+            for dim in range(2): # just x, y pos (z handled by foot on ground cost
+                c = tmls.prog.AddLinearConstraint(tmls.p[leg_idx, dim] == pos[dim])
+                tmls.test_constraints.append(c)
+
         # Add constraints
         add_initial_constraints(tmls)
-        add_kinematic_constraints(tmls)
-        add_giac_constraints(tmls)
-        add_friction_cone_constraints(tmls)
+        # add_kinematic_constraints(tmls)
+        # add_giac_constraints(tmls)
+        # add_friction_cone_constraints(tmls)
 
         # Add costs
         add_foothold_on_ground_cost(tmls)
@@ -141,11 +148,31 @@ class LeggedRobot(BaseTask):
 
         # Solve optimization
         solver = SnoptSolver()
-        result = solver.Solve(tmls.prog)
+        tmls.result = solver.Solve(tmls.prog)
+
+        # Check if optimization succeeded before accessing result
+        if not tmls.result.is_success():
+            print("Optimization failed, using fallback strategy")
+            current_positions = self.rigid_body_states[:, self.feet_indices, :3]
+            new_positions = current_positions.clone()
+            new_positions[:, :, 0] += 0.1  # Move 10cm forward
+            return new_positions
+
+        # Only try to get solution if optimization succeeded
+        tmls.optimal_footsteps = tmls.result.GetSolution(tmls.p)
+        num_phases = len(tmls.gait_pattern['phase_timing']) - 1
+        tmls.optimal_spline_coeffs = [tmls.result.GetSolution(tmls.spline_coeffs[i]) for i in range(num_phases)]
+
+        # Create output directory if it doesn't exist
+        os.makedirs('out', exist_ok=True)
+        
+        # Then call plotting functions
+        plot_optimal_solutions_interactive(tmls)
+        save_optimal_solutions(tmls)
 
         # Extract solution
-        if result.is_success():
-            optimal_footsteps = result.GetSolution(tmls.p)
+        if tmls.result.is_success():
+            optimal_footsteps = tmls.result.GetSolution(tmls.p)
             # Convert to tensor and repeat for all environments
             optimal_positions = torch.tensor(optimal_footsteps, device=self.device)
             optimal_positions = optimal_positions.unsqueeze(0).repeat(self.num_envs, 1, 1)
@@ -1074,8 +1101,8 @@ class LeggedRobot(BaseTask):
         """Updates self.immediate_heightfield with height values in a 0.56m x 0.56m area around the robot, 
         sampled to a 14x14 grid"""
         # Physical dimensions desired
-        window_size_meters = 3  # 0.56m x 0.56m window (TODO: Adjust however much you want)
-        samples_per_side = 14      # 14 x 14 grid (TODO: adjust however much u want)
+        window_size_meters = 1.11  # 3m x 3m window (TODO: Adjust however much you want)
+        samples_per_side = 17      # 14 x 14 grid (TODO: adjust however much u want)
         
         # Calculate sampling interval in meters
         sample_spacing = window_size_meters / (samples_per_side - 1)  # Distance between samples

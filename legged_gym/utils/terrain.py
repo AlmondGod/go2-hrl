@@ -136,7 +136,7 @@ class Terrain:
         # demo_terrain(terrain)
         # parkour_terrain(terrain)
         # complex_parkour_terrain(terrain, difficulty)
-        column_field_terrain(terrain, difficulty)
+        # column_field_terrain(terrain, difficulty)
         # varied_column_field_terrain(terrain, difficulty)
         
         return terrain
@@ -171,7 +171,7 @@ def gap_terrain(terrain, gap_size, platform_size=1.):
     y1 = (terrain.width - platform_size) // 2
     y2 = y1 + gap_size
    
-    terrain.height_field_raw[center_x-x2 : center_x + x2, center_y-y2 : center_y + y2] = -1000
+    terrain.height_field_raw[center_x-x2 : center_x + x2, center_y-y2 : center_y + y2] = -4000
     terrain.height_field_raw[center_x-x1 : center_x + x1, center_y-y1 : center_y + y1] = 0
 
 def pit_terrain(terrain, depth, platform_size=1.):
@@ -674,7 +674,7 @@ def complex_parkour_terrain(terrain, difficulty=1.0):
     return terrain
 
 def column_field_terrain(terrain, difficulty=1.0):
-    """Creates a terrain with a field of evenly spaced columns that rise from the pit to ground level
+    """Creates a terrain with a dense field of small, closely spaced columns that rise from the pit to ground level
     
     Args:
         terrain: SubTerrain object
@@ -693,9 +693,9 @@ def column_field_terrain(terrain, difficulty=1.0):
             return int(meters / terrain.vertical_scale)
         return int(meters / terrain.horizontal_scale)
     
-    # Column parameters
-    column_width = m_to_terrain(0.5)  # 50cm wide columns (increased from 30cm)
-    column_spacing = m_to_terrain(0.4)  # 40cm between columns
+    # Column parameters - much smaller and closer together
+    column_width = m_to_terrain(0.35)  # 15cm wide columns (reduced from 50cm)
+    column_spacing = m_to_terrain(0.11)  # 5cm between columns (reduced from 40cm)
     column_height = 0  # Columns reach ground level (height of 0)
     
     # Calculate number of columns that can fit in each dimension
@@ -717,7 +717,10 @@ def column_field_terrain(terrain, difficulty=1.0):
             
             # Place column if within bounds
             if x_end < length and y_end < width:
-                terrain.height_field_raw[x_start:x_end, y_start:y_end] = column_height
+                # Add slight random variation to column height to make it more interesting
+                height_variation = np.random.randint(-m_to_terrain(0.05, is_height=True), 
+                                                   m_to_terrain(0.05, is_height=True))
+                terrain.height_field_raw[x_start:x_end, y_start:y_end] = column_height + height_variation
     
     # Create end platform
     end_platform_length = m_to_terrain(1.0)
@@ -734,7 +737,7 @@ def varied_column_field_terrain(terrain, difficulty=1.0):
         difficulty: Scales the gap distances
     """
     # Set pit depth
-    pit_depth = -10000  
+    pit_depth = -40000  
     terrain.height_field_raw.fill(pit_depth)
     
     # Get terrain dimensions
@@ -809,7 +812,7 @@ def round_varied_column_field_terrain(terrain, difficulty=1.0):
         difficulty: Scales the gap distances
     """
     # Set pit depth
-    pit_depth = -10000  
+    pit_depth = -40000  
     terrain.height_field_raw.fill(pit_depth)
     
     # Get terrain dimensions
