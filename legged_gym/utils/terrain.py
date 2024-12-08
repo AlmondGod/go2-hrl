@@ -136,7 +136,7 @@ class Terrain:
         # demo_terrain(terrain)
         # parkour_terrain(terrain)
         # complex_parkour_terrain(terrain, difficulty)
-        # column_field_terrain(terrain, difficulty)
+        column_field_terrain(terrain, difficulty)
         # varied_column_field_terrain(terrain, difficulty)
         
         return terrain

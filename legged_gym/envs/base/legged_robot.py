@@ -355,7 +355,6 @@ class LeggedRobot(BaseTask):
             self._ensure_float32(self.actions)
         ], dim=-1)
         
-        print(f"Observation shape: {obs.shape}")  # Debug print
         return obs
 
     def create_sim(self):
@@ -473,9 +472,9 @@ class LeggedRobot(BaseTask):
         # Update local heightfield window
         self._update_local_heightfield()
 
-        print(f"immediate_heightfield shape: {self.immediate_heightfield.shape}")
-        print(f"immediate_heightfield: {self.immediate_heightfield}")
-        print(f"sum immediate_heightfield: {np.sum(self.immediate_heightfield)}")
+        # print(f"immediate_heightfield shape: {self.immediate_heightfield.shape}")
+        # print(f"immediate_heightfield: {self.immediate_heightfield}")
+        # print(f"sum immediate_heightfield: {np.sum(self.immediate_heightfield)}")
 
     def _resample_commands(self, env_ids):
         """ Randommly select commands of some environments
