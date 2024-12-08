@@ -18,6 +18,11 @@ from legged_gym.utils.isaacgym_utils import get_euler_xyz as get_euler_xyz_in_te
 from legged_gym.utils.helpers import class_to_dict
 from .legged_robot_config import LeggedRobotCfg
 from legged_gym.utils.terrain import Terrain
+from fetch.tamols.tamols import TAMOLSState, setup_variables
+from fetch.tamols.constraints import add_initial_constraints, add_kinematic_constraints, add_giac_constraints, add_friction_cone_constraints
+from fetch.tamols.costs import add_tracking_cost, add_foothold_on_ground_cost, add_nominal_kinematic_cost, add_base_pose_alignment_cost, add_edge_avoidance_cost
+from fetch.tamols.map_processing import process_height_maps
+from pydrake.solvers import SnoptSolver
 
 class LeggedRobot(BaseTask):
     def __init__(self, cfg: LeggedRobotCfg, sim_params, physics_engine, sim_device, headless):
@@ -54,42 +59,104 @@ class LeggedRobot(BaseTask):
         self.target_positions_two = self.trajectory_optimizer()
         self.active_pair = 1  # Start with pair 1 (FR+BL)
        
-    def trajectory_optimizer(self): # TODO: define other inputs if desired
+    def trajectory_optimizer(self):
         """
-        inputs: current position, whatever yall want
-        outputs:next four target foot positions
-        this should only be called once the previous positions have been achieved (can add a check for this)
+        Uses TAMOLS optimization to find optimal foot positions given the current state and terrain.
+        Returns: Tensor of shape (num_envs, num_feet, 3) containing target positions
         """
-        # TODO: implement
-
-        # this is the heightfield:
-        heightfield = self.terrain.height_field_raw.astype(np.int16)
-        print(f"heightfield shape: {heightfield.shape}")
-        print(f"heightfield: {heightfield}")
-        print(f"sum heightfield: {np.sum(heightfield)}")
-
-        heights_in_meters = self.immediate_heightfield * self.terrain.cfg.vertical_scale
-        print(f"heights_in_meters shape: {heights_in_meters.shape}")
-        print(f"heights_in_meters: {heights_in_meters}")
-        print(f"sum heights_in_meters: {np.sum(heights_in_meters)}")
-        # The horizontal scale (distance between points) : (currently 0.1 m)
-        # The vertical scale (height multiplier) : (currently 0.005 m)
-        # both defined in legged_robot_config.py
-
-        # SIMPLE TRAJECTORY FOR NOW (just move 0.1m forward):
-
-        # Get current positions of all feet
-        current_feet_pos = self.rigid_body_states[:, self.feet_indices, :3]
+        # Initialize TAMOLS state
+        tmls = TAMOLSState()
         
-        # Create new target positions (example: move forward by 0.1m)
-        new_targets = current_feet_pos.clone()
-        new_targets[:, :, 0] += 0.1  # Move forward in x direction
+        # Set current state
+        tmls.base_pose = np.array([
+            self.root_states[0, 0].cpu().numpy(),  # x
+            self.root_states[0, 1].cpu().numpy(),  # y
+            self.root_states[0, 2].cpu().numpy(),  # z
+            self.rpy[0, 0].cpu().numpy(),          # roll
+            self.rpy[0, 1].cpu().numpy(),          # pitch
+            self.rpy[0, 2].cpu().numpy()           # yaw
+        ])
         
-        return new_targets
+        # Set base velocity (linear and angular)
+        tmls.base_vel = np.array([
+            self.root_states[0, 7].cpu().numpy(),   # linear x
+            self.root_states[0, 8].cpu().numpy(),   # linear y
+            self.root_states[0, 9].cpu().numpy(),   # linear z
+            self.root_states[0, 10].cpu().numpy(),  # angular x
+            self.root_states[0, 11].cpu().numpy(),  # angular y
+            self.root_states[0, 12].cpu().numpy()   # angular z
+        ])
 
+        # Set reference velocity and angular momentum
+        tmls.ref_vel = np.array([0.1, 0, 0])  # Example: move forward at 0.1 m/s
+        tmls.ref_angular_momentum = np.array([0, 0, 0])  # No angular momentum
+        
+        # Set gait pattern
+        tmls.gait_pattern = {
+            'phase_timing': [0, 0.4, 0.8, 1.2, 1.6, 2.0],
+            'contact_states': [
+                [1, 1, 1, 1],
+                [1, 0, 1, 0],
+                [1, 1, 1, 1],
+                [0, 1, 0, 1],
+                [1, 1, 1, 1],
+            ],
+            'at_des_position': [
+                [0, 0, 0, 0],
+                [0, 0, 0, 0],
+                [0, 1, 0, 1],
+                [0, 1, 0, 1],
+                [1, 1, 1, 1],
+            ],
+        }
 
-# 0.56 x 0.56 
-# 14 x 14 numbers
+        # Set current foot positions
+        tmls.p_meas = self.rigid_body_states[0, self.feet_indices, :3].cpu().numpy()
+
+        # Process heightfield
+        elevation_map = self.immediate_heightfield.astype(np.float32)
+        h_s1, h_s2, gradients = process_height_maps(elevation_map)
+        
+        # Set height maps and gradients
+        tmls.h = elevation_map
+        tmls.h_s1 = h_s1
+        tmls.h_s2 = h_s2
+        tmls.h_grad_x, tmls.h_grad_y = gradients['h']
+        tmls.h_s1_grad_x, tmls.h_s1_grad_y = gradients['h_s1']
+        tmls.h_s2_grad_x, tmls.h_s2_grad_y = gradients['h_s2']
+
+        # Setup optimization variables
+        setup_variables(tmls)
+
+        # Add constraints
+        add_initial_constraints(tmls)
+        add_kinematic_constraints(tmls)
+        add_giac_constraints(tmls)
+        add_friction_cone_constraints(tmls)
+
+        # Add costs
+        add_foothold_on_ground_cost(tmls)
+        add_nominal_kinematic_cost(tmls)
+        add_base_pose_alignment_cost(tmls)
+
+        # Solve optimization
+        solver = SnoptSolver()
+        result = solver.Solve(tmls.prog)
+
+        # Extract solution
+        if result.is_success():
+            optimal_footsteps = result.GetSolution(tmls.p)
+            # Convert to tensor and repeat for all environments
+            optimal_positions = torch.tensor(optimal_footsteps, device=self.device)
+            optimal_positions = optimal_positions.unsqueeze(0).repeat(self.num_envs, 1, 1)
+            return optimal_positions
+        else:
+            # If optimization fails, return current positions plus small forward step
+            print("Optimization failed, using fallback strategy")
+            current_positions = self.rigid_body_states[:, self.feet_indices, :3]
+            new_positions = current_positions.clone()
+            new_positions[:, :, 0] += 0.1  # Move 10cm forward
+            return new_positions
 
     def step(self, actions):
         # Get current foot positions

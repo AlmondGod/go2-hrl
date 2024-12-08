@@ -681,7 +681,7 @@ def column_field_terrain(terrain, difficulty=1.0):
         difficulty: Scales the gap distances
     """
     # Set pit depth and matching column height
-    pit_depth = -10000  # Deep pit
+    pit_depth = -100  # Deep pit
     terrain.height_field_raw.fill(pit_depth)
     
     # Get terrain dimensions
