@@ -1,0 +1,82 @@
+Optimal Footsteps:
+Footstep 1: 0.4, 0.1, 0.0004808882758353362
+Footstep 2: 0.4, -0.1, -0.007630702199643492
+Footstep 3: 0.0, 0.1, 0.00010810802111241771
+Footstep 4: 0.0, -0.1, -0.015470070191960592
+
+Objective Function Optimal Value:
+Optimal Value: 0.672441
+
+Optimal Spline End Points and Euler Angles:
+Phase 1 Start Point:   0.780533,  -0.945085,   0.005170,  -0.000010,   0.000300,   0.000041
+Phase 2 Start Point:   1.066989,  -0.903916,   0.149999,  -0.027995,  -0.001021,  -0.000002
+Phase 3 Start Point:   0.759970,  -0.641131,   0.150001,   0.244232,  -0.000499,  -3.141595
+Phase 4 Start Point:   0.361114,  -0.294981,   0.150001,   0.306719,  -0.000274,  -3.141596
+Phase 5 Start Point:   0.158568,  -0.084510,   0.149999,  -0.079350,  -0.000170,  -3.141609
+Phase 5 End Point:     0.260864,   0.062840,  -0.104733,   0.117112,  -0.544051,   4.937178
+
+Optimal Spline Velocities and Euler Derivatives:
+Phase 1 Start Velocity:  -0.000775,  -0.012805,   0.978062,  -0.011850,  -0.058835,   0.006680
+Phase 2 Start Velocity:  -0.446436,   0.408296,  -0.583172,  -0.311629,  -0.977044,  -2.032041
+Phase 3 Start Velocity:  -0.915653,   0.990747,  -0.702811,   1.880605,  -2.487327,   0.700211
+Phase 4 Start Velocity:  -1.078190,   0.603157,   2.307735,  -1.982003,   0.728551,  -8.569268
+Phase 5 Start Velocity:   0.163343,   0.423106,   0.456135,   0.310441,   0.440905,  12.023252
+Phase 5 End Velocity:     0.358269,   0.187925,  -2.004145,   0.692625,  -5.056759,  28.763095
+
+
+Reference Velocity: [0.1 0.  0. ]
+
+Foot Distances to Base:
+Foot 1 to Base: 1.112219
+Foot 2 to Base: 0.926897
+Foot 3 to Base: 1.304400
+Foot 4 to Base: 1.150577
+
+
+
+
+------- CONSTRAINT INFORMATION --------
+
+Test Constraints Information:
+LinearEqualityConstraint
+p(0,0) == 0.4
+[[<Expression "0.40000000000000002">]]
+
+LinearEqualityConstraint
+p(0,1) == 0.1
+[[<Expression "0.10000000000000001">]]
+
+LinearEqualityConstraint
+p(1,0) == 0.4
+[[<Expression "0.40000000000000002">]]
+
+LinearEqualityConstraint
+p(1,1) == -0.1
+[[<Expression "-0.10000000000000001">]]
+
+LinearEqualityConstraint
+p(2,0) == 0
+[[<Expression "0">]]
+
+LinearEqualityConstraint
+p(2,1) == 0.1
+[[<Expression "0.10000000000000001">]]
+
+LinearEqualityConstraint
+p(3,0) == 0
+[[<Expression "0">]]
+
+LinearEqualityConstraint
+p(3,1) == -0.1
+[[<Expression "-0.10000000000000001">]]
+
+
+GIAC Constraints Information:
+
+Kinematic Constraints Information:
+------- COST INFORMATION --------
+
+Tracking Costs Information:
+
+Foothold On Ground Costs Information:
+Cost 1: [[<Expression "0.002977936286818964">]]

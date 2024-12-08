@@ -163,10 +163,6 @@ class LeggedRobot(BaseTask):
         num_phases = len(tmls.gait_pattern['phase_timing']) - 1
         tmls.optimal_spline_coeffs = [tmls.result.GetSolution(tmls.spline_coeffs[i]) for i in range(num_phases)]
 
-        # Create output directory if it doesn't exist
-        os.makedirs('out', exist_ok=True)
-        
-        # Then call plotting functions
         plot_optimal_solutions_interactive(tmls)
         save_optimal_solutions(tmls)
 
@@ -347,18 +343,33 @@ class LeggedRobot(BaseTask):
     def compute_observations(self):
         """ Computes observations
         """
-        self.obs_buf = torch.cat((  self.base_lin_vel * self.obs_scales.lin_vel,
-                                    self.base_ang_vel  * self.obs_scales.ang_vel,
-                                    self.projected_gravity,
-                                    self.commands[:, :3] * self.commands_scale,
-                                    (self.dof_pos - self.default_dof_pos) * self.obs_scales.dof_pos,
-                                    self.dof_vel * self.obs_scales.dof_vel,
-                                    self.actions
-                                    ),dim=-1)
-        # add perceptive inputs if not blind
-        # add noise if needed
-        if self.add_noise:
-            self.obs_buf += (2 * torch.rand_like(self.obs_buf) - 1) * self.noise_scale_vec
+        self.obs_buf = torch.cat((
+            self.base_lin_vel * self.obs_scales.lin_vel,
+            self.base_ang_vel * self.obs_scales.ang_vel,
+            self.projected_gravity,
+            self.commands[:, :3] * self.commands_scale,
+            (self.dof_pos - self.default_dof_pos) * self.obs_scales.dof_pos,
+            self.dof_vel * self.obs_scales.dof_vel,
+            self.actions
+        ), dim=-1)
+
+        # Reshape target positions to match batch size and apply scaling
+        # Assuming target_positions_one/two are [num_envs, num_feet, 3]
+        target_pos_one = self.target_positions_one.reshape(self.num_envs, -1)  # Flatten to [num_envs, num_feet*3]
+        target_pos_two = self.target_positions_two.reshape(self.num_envs, -1)  # Flatten to [num_envs, num_feet*3]
+        
+        # Apply scaling
+        scaled_target_one = target_pos_one * self.obs_scales.target_positions
+        scaled_target_two = target_pos_two * self.obs_scales.target_positions
+        
+        # Concatenate with observation buffer
+        self.obs_buf = torch.cat((
+            self.obs_buf,
+            scaled_target_one,
+            scaled_target_two
+        ), dim=-1)
+
+        return self.obs_buf
 
     def create_sim(self):
         """ Creates simulation, terrain and evironments
@@ -873,7 +884,6 @@ class LeggedRobot(BaseTask):
         self.reward_scales = class_to_dict(self.cfg.rewards.scales)
         self.command_ranges = class_to_dict(self.cfg.commands.ranges)
      
-
         self.max_episode_length_s = self.cfg.env.episode_length_s
         self.max_episode_length = np.ceil(self.max_episode_length_s / self.dt)
 
