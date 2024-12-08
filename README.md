@@ -27,6 +27,10 @@ This is a simple example of using Unitree Robots for reinforcement learning, inc
    - Navigate to the folder `unitree_rl_gym`
    - `pip install -e .`
 
+6. Install fetch submodule
+
+   - `git submodule update --init`
+
 ### Usage
 
 1. Train:
