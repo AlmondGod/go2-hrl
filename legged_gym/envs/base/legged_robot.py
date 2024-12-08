@@ -139,14 +139,14 @@ class LeggedRobot(BaseTask):
 
         # Add constraints
         add_initial_constraints(tmls)
-        # add_kinematic_constraints(tmls)
+        add_kinematic_constraints(tmls)
         # add_giac_constraints(tmls)
         # add_friction_cone_constraints(tmls)
 
         # Add costs
         add_foothold_on_ground_cost(tmls)
-        add_nominal_kinematic_cost(tmls)
-        add_base_pose_alignment_cost(tmls)
+        # add_nominal_kinematic_cost(tmls)
+        # add_base_pose_alignment_cost(tmls)
 
         # Solve optimization
         solver = SnoptSolver()
@@ -187,11 +187,11 @@ class LeggedRobot(BaseTask):
         # Get current foot positions
         current_feet_pos = self.rigid_body_states[:, self.feet_indices, :3]
         
-        # Define diagonal pairs (FR+BL: 1,4 and FL+BR: 0,3)
-        pair1_indices = torch.tensor([1, 2], device=self.device)  # FR, BL
-        pair2_indices = torch.tensor([0, 3], device=self.device)  # FL, BR
+        # Define diagonal pairs 
+        pair1_indices = torch.tensor([0, 3], device=self.device)  # LF, RH
+        pair2_indices = torch.tensor([1, 2], device=self.device)  # RF, LH
         
-        # Check if active pair reached their targets
+        # Check if active pair reached their targets # NOTE:is equals to strong of a constaint?
         if self.active_pair == 1:
             active_indices = pair1_indices
             check_positions = current_feet_pos[:, pair1_indices]
@@ -213,7 +213,7 @@ class LeggedRobot(BaseTask):
             self.target_positions_one[env_ids] = self.target_positions_two[env_ids]
             
             # Calculate new target positions
-            new_targets = self.trajectory_optimizer()
+            new_targets = self.trajectory_optimizer() # DO WE HAVE TO DO THIS JUST YET? (if only half way through the traj)
             self.target_positions_two[env_ids] = new_targets[env_ids]
             
             # Switch active pair
@@ -270,7 +270,7 @@ class LeggedRobot(BaseTask):
 
         # compute observations, rewards, resets, ...
         self.check_termination()
-        self.compute_reward()
+        self.compute_reward() # COMPUTE REWARD
         env_ids = self.reset_buf.nonzero(as_tuple=False).flatten()
         self.reset_idx(env_ids)
         self.compute_observations() # in some cases a simulation step might be required to refresh some obs (for example body positions)

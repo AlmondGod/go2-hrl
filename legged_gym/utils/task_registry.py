@@ -72,7 +72,7 @@ class TaskRegistry():
                             headless=args.headless)
         return env, env_cfg
 
-    def make_alg_runner(self, env, name=None, args=None, train_cfg=None, log_root="default") -> Tuple[OnPolicyRunner, LeggedRobotCfgPPO]:
+    def make_alg_runner(self, env, name=None, args=None, train_cfg=None, log_root="default", writer=None) -> Tuple[OnPolicyRunner, LeggedRobotCfgPPO]:
         """ Creates the training algorithm  either from a registered namme or from the provided config file.
 
         Args:
@@ -82,6 +82,7 @@ class TaskRegistry():
             train_cfg (Dict, optional): Training config file. If None 'name' will be used to get the config file. Defaults to None.
             log_root (str, optional): Logging directory for Tensorboard. Set to 'None' to avoid logging (at test time for example). 
                                       Logs will be saved in <log_root>/<date_time>_<run_name>. Defaults to "default"=<path_to_LEGGED_GYM>/logs/<experiment_name>.
+            writer (SummaryWriter, optional): TensorBoard writer. If None, no logging will be done. Defaults to None.
 
         Raises:
             ValueError: Error if neither 'name' or 'train_cfg' are provided
@@ -115,7 +116,8 @@ class TaskRegistry():
             log_dir = os.path.join(log_root, datetime.now().strftime('%b%d_%H-%M-%S') + '_' + train_cfg.runner.run_name)
         
         train_cfg_dict = class_to_dict(train_cfg)
-        runner = OnPolicyRunner(env, train_cfg_dict, log_dir, device=args.rl_device)
+        runner = OnPolicyRunner(env, train_cfg_dict, log_dir, device=args.rl_device,  
+                               writer=writer)
         #save resume path before creating a new log_dir
         resume = train_cfg.runner.resume
         if resume:
