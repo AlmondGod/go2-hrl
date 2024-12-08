@@ -59,7 +59,7 @@ class GO2RoughCfg( LeggedRobotCfg ):
             stand_still = 0.0  # Disable stand still reward
 
             # TODO: uncomment this to activate foot-target-distance-based reward
-            # target_dists = 40.0
+            target_dists = 40.0
 
             # TODO: comment this (this is for base PPO rewards)
             xy_progress = 10.0

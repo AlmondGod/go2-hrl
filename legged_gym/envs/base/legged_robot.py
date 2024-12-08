@@ -981,7 +981,7 @@ class LeggedRobot(BaseTask):
         """
         foot_positions = self.rigid_body_states[:, self.feet_indices, :3]
 
-        distances = torch.norm(foot_positions - self.target_positions, dim=-1)  # shape (num_envs, num_feet)
+        distances = torch.norm(foot_positions - self.target_positions_one, dim=-1) + torch.norm(foot_positions - self.target_positions_two, dim=-1)  # shape (num_envs, num_feet)
     
         total_distance = torch.sum(distances, dim=1)  # shape (num_envs)
         

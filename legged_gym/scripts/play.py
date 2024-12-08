@@ -37,13 +37,14 @@ def play(args):
     web_viewer.setup(env)
 
 
-    obs = env.get_observations()
+    # NOTE COMMENTED TODO UNCOMMENT
+    # obs = env.get_observations()
     # load policy
-    train_cfg.runner.resume = True
-    ppo_runner, train_cfg = task_registry.make_alg_runner(env=env, name=args.task, args=args, train_cfg=train_cfg)
-    policy = ppo_runner.get_inference_policy(device=env.device)
+    # train_cfg.runner.resume = True
+    # ppo_runner, train_cfg = task_registry.make_alg_runner(env=env, name=args.task, args=args, train_cfg=train_cfg)
+    # policy = ppo_runner.get_inference_policy(device=env.device)
 
-    print("initialized policy")
+    # print("initialized policy")
 
     num_feet = len(env.feet_indices)
     target_positions = torch.zeros((env.num_envs, num_feet, 3), 
@@ -55,21 +56,36 @@ def play(args):
                                                 dtype=torch.float32, device=env.device)
     env.update_target_positions(target_positions)
     
+    # NOTE COMMENTED TODO UNCOMMENT
     # export policy as a jit module (used to run it from C++)
-    if EXPORT_POLICY:
-        path = os.path.join(LEGGED_GYM_ROOT_DIR, 'logs', train_cfg.runner.experiment_name, 'exported', 'policies')
-        export_policy_as_jit(ppo_runner.alg.actor_critic, path)
-        print('Exported policy as jit script to: ', path)
+    # if EXPORT_POLICY:
+    #     path = os.path.join(LEGGED_GYM_ROOT_DIR, 'logs', train_cfg.runner.experiment_name, 'exported', 'policies')
+    #     export_policy_as_jit(ppo_runner.alg.actor_critic, path)
+    #     print('Exported policy as jit script to: ', path)
 
-    for i in range(10*int(env.max_episode_length)):
-        actions = policy(obs.detach())
-        print("stepping")
-        obs, _, rews, dones, infos = env.step(actions.detach())
+    # NOTE COMMENTED TODO UNCOMMENT
+    # Comment out the loop that steps through the environment
+    # for i in range(10*int(env.max_episode_length)):
+    #     actions = policy(obs.detach())
+    #     print("stepping")
+    #     obs, _, rews, dones, infos = env.step(actions.detach())
         
-        web_viewer.render(fetch_results=True,
-                        step_graphics=True,
-                        render_all_camera_sensors=True,
-                        wait_for_page_load=True)
+    # Draw planned footsteps
+    planned_footsteps = [[0.3, 0.2, 0], [0.4, 0.3, 0], [0.5, 0.4, 0]]  # Example coordinates
+    
+
+    # Add spheres at the planned footsteps
+    planned_footsteps = target_positions.cpu().numpy()  # Convert to numpy for easier handling
+    for footstep in planned_footsteps[0]:  # Assuming we want to draw for the first environment
+        # Assuming footstep is a list or array of [x, y, z] coordinates
+        web_viewer.add_sphere(position=footstep, radius=0.05, color=[1, 0, 0])
+
+
+
+    web_viewer.render(fetch_results=True,
+                      step_graphics=True,
+                      render_all_camera_sensors=True,
+                      wait_for_page_load=True)
 
 if __name__ == '__main__':
     EXPORT_POLICY = True

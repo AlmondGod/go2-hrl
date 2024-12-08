@@ -17,8 +17,9 @@ def train(args):
     env, env_cfg = task_registry.make_env(name=args.task, args=args)
     
     # Create tensorboard writer with proper directory structure
+    experiment_name = args.task  # Use task name as experiment name
     current_time = datetime.now().strftime('%b%d_%H-%M-%S')
-    log_dir = os.path.join('logs', current_time)
+    log_dir = os.path.join('logs', experiment_name, current_time)
     os.makedirs(log_dir, exist_ok=True)  # Create directory if it doesn't exist
     
     writer = SummaryWriter(log_dir=log_dir)
