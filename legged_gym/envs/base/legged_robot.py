@@ -963,33 +963,34 @@ class LeggedRobot(BaseTask):
         self.target_positions = positions
 
     def _update_local_heightfield(self):
-        """Updates self.immediate_heightfield with a 14x14 window of height values around the robot"""
+        """Updates self.immediate_heightfield with height values in a 0.56m x 0.56m area around the robot, 
+        sampled to a 14x14 grid"""
+        # Physical dimensions desired
+        window_size_meters = 3  # 0.56m x 0.56m window (TODO: Adjust however much you want)
+        samples_per_side = 14      # 14 x 14 grid (TODO: adjust however much u want)
+        
+        # Calculate sampling interval in meters
+        sample_spacing = window_size_meters / (samples_per_side - 1)  # Distance between samples
+        
         # Get robot's current position in world coordinates
         base_pos = self.root_states[0, 0:3]  # Using first env's robot position
         
-        # Convert world coordinates to heightfield indices
-        # Note: Need to account for the border and terrain scaling
-        hf_row = int((base_pos[0] + self.terrain.cfg.border_size) / self.terrain.cfg.horizontal_scale)
-        hf_col = int((base_pos[1] + self.terrain.cfg.border_size) / self.terrain.cfg.horizontal_scale)
+        # Initialize the result grid
+        self.immediate_heightfield = np.zeros((samples_per_side, samples_per_side), dtype=np.int16)
         
-        # Define the window size (14x14)
-        window_size = 14
-        half_window = window_size // 2
-        
-        # Extract heightfield window, handling boundary conditions
-        row_start = max(0, hf_row - half_window)
-        row_end = min(self.terrain.height_field_raw.shape[0], hf_row + half_window)
-        col_start = max(0, hf_col - half_window)
-        col_end = min(self.terrain.height_field_raw.shape[1], hf_col + half_window)
-        
-        # Initialize the window with zeros
-        self.immediate_heightfield = np.zeros((window_size, window_size), dtype=np.int16)
-        
-        # Fill the available heightfield data
-        valid_rows = slice(max(0, half_window - hf_row), 
-                          min(window_size, window_size - (hf_row + half_window - self.terrain.height_field_raw.shape[0])))
-        valid_cols = slice(max(0, half_window - hf_col),
-                          min(window_size, window_size - (hf_col + half_window - self.terrain.height_field_raw.shape[1])))
-        
-        self.immediate_heightfield[valid_rows, valid_cols] = \
-            self.terrain.height_field_raw[row_start:row_end, col_start:col_end]
+        # Calculate world coordinates for each sample point
+        for i in range(samples_per_side):
+            for j in range(samples_per_side):
+                # Calculate world position for this sample
+                # Center the window on the robot and offset by sample position
+                world_x = base_pos[0] + (i - samples_per_side/2) * sample_spacing
+                world_y = base_pos[1] + (j - samples_per_side/2) * sample_spacing
+                
+                # Convert world coordinates to heightfield indices
+                hf_row = int((world_x + self.terrain.cfg.border_size) / self.terrain.cfg.horizontal_scale)
+                hf_col = int((world_y + self.terrain.cfg.border_size) / self.terrain.cfg.horizontal_scale)
+                
+                # Check bounds and sample height
+                if (0 <= hf_row < self.terrain.height_field_raw.shape[0] and 
+                    0 <= hf_col < self.terrain.height_field_raw.shape[1]):
+                    self.immediate_heightfield[i, j] = self.terrain.height_field_raw[hf_row, hf_col]
