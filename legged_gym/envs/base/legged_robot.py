@@ -49,8 +49,10 @@ class LeggedRobot(BaseTask):
 
         self.immediate_heightfield = np.zeros((14, 14), dtype=np.int16)
 
-        self.target_positions = self.trajectory_optimizer()
-        
+        # target positions one starts at current leg locations
+        self.target_positions_one = self.rigid_body_states[:, self.feet_indices, :3]  # Shape: (num_envs, num_feet, 3)
+        self.target_positions_two = self.trajectory_optimizer()
+        self.active_pair = 1  # Start with pair 1 (FR+BL)
        
     def trajectory_optimizer(self): # TODO: define other inputs if desired
         """
@@ -70,30 +72,65 @@ class LeggedRobot(BaseTask):
         print(f"heights_in_meters shape: {heights_in_meters.shape}")
         print(f"heights_in_meters: {heights_in_meters}")
         print(f"sum heights_in_meters: {np.sum(heights_in_meters)}")
-        
         # The horizontal scale (distance between points) : (currently 0.1 m)
         # The vertical scale (height multiplier) : (currently 0.005 m)
         # both defined in legged_robot_config.py
 
-        return None
+        # SIMPLE TRAJECTORY FOR NOW (just move 0.1m forward):
+
+        # Get current positions of all feet
+        current_feet_pos = self.rigid_body_states[:, self.feet_indices, :3]
+        
+        # Create new target positions (example: move forward by 0.1m)
+        new_targets = current_feet_pos.clone()
+        new_targets[:, :, 0] += 0.1  # Move forward in x direction
+        
+        return new_targets
+
 
 # 0.56 x 0.56 
 # 14 x 14 numbers
 
     def step(self, actions):
-        # TODO: maintain self.target_positions 
-            # (if foot poses are within a small delta of target poses, 
-            # then recalculate them by calling trajectory_optimizer(),
-            # otherwise they can stay the same)
-
-        """ Apply actions, simulate, call self.post_physics_step()
-
-        Args:
-            actions (torch.Tensor): Tensor of shape (num_envs, num_actions_per_env)
-        """
-
+        # Get current foot positions
+        current_feet_pos = self.rigid_body_states[:, self.feet_indices, :3]
+        
+        # Define diagonal pairs (FR+BL: 1,4 and FL+BR: 0,3)
+        pair1_indices = torch.tensor([1, 2], device=self.device)  # FR, BL
+        pair2_indices = torch.tensor([0, 3], device=self.device)  # FL, BR
+        
+        # Check if active pair reached their targets
+        if self.active_pair == 1:
+            active_indices = pair1_indices
+            check_positions = current_feet_pos[:, pair1_indices]
+            check_targets = self.target_positions_two[:, pair1_indices]
+        else:
+            active_indices = pair2_indices
+            check_positions = current_feet_pos[:, pair2_indices]
+            check_targets = self.target_positions_two[:, pair2_indices]
+        
+        # Check if feet reached targets
+        feet_reached = self._check_feet_at_target(check_positions, check_targets)
+        
+        # If feet reached targets, swap positions and calculate new targets
+        if torch.any(feet_reached):
+            # Update environments where feet reached targets
+            env_ids = torch.where(feet_reached)[0]
+            
+            # Swap positions (pos2 becomes pos1)
+            self.target_positions_one[env_ids] = self.target_positions_two[env_ids]
+            
+            # Calculate new target positions
+            new_targets = self.trajectory_optimizer()
+            self.target_positions_two[env_ids] = new_targets[env_ids]
+            
+            # Switch active pair
+            self.active_pair = 3 - self.active_pair  # Toggles between 1 and 2
+        
+        # Continue with normal step logic
         clip_actions = self.cfg.normalization.clip_actions
         self.actions = torch.clip(actions, -clip_actions, clip_actions).to(self.device)
+        
         # step physics and render each frame
         self.render()
         for _ in range(self.cfg.control.decimation):
@@ -478,13 +515,17 @@ class LeggedRobot(BaseTask):
         actor_root_state = self.gym.acquire_actor_root_state_tensor(self.sim)
         dof_state_tensor = self.gym.acquire_dof_state_tensor(self.sim)
         net_contact_forces = self.gym.acquire_net_contact_force_tensor(self.sim)
+        rigid_body_state_tensor = self.gym.acquire_rigid_body_state_tensor(self.sim)
+        
         self.gym.refresh_dof_state_tensor(self.sim)
         self.gym.refresh_actor_root_state_tensor(self.sim)
         self.gym.refresh_net_contact_force_tensor(self.sim)
+        self.gym.refresh_rigid_body_state_tensor(self.sim)
 
         # create some wrapper tensors for different slices
         self.root_states = gymtorch.wrap_tensor(actor_root_state)
         self.dof_state = gymtorch.wrap_tensor(dof_state_tensor)
+        self.rigid_body_states = gymtorch.wrap_tensor(rigid_body_state_tensor).view(self.num_envs, -1, 13)
         self.dof_pos = self.dof_state.view(self.num_envs, self.num_dof, 2)[..., 0]
         self.dof_vel = self.dof_state.view(self.num_envs, self.num_dof, 2)[..., 1]
         self.base_quat = self.root_states[:, 3:7]
@@ -994,3 +1035,11 @@ class LeggedRobot(BaseTask):
                 if (0 <= hf_row < self.terrain.height_field_raw.shape[0] and 
                     0 <= hf_col < self.terrain.height_field_raw.shape[1]):
                     self.immediate_heightfield[i, j] = self.terrain.height_field_raw[hf_row, hf_col]
+
+    def _check_feet_at_target(self, feet_positions, target_positions, threshold=0.02):
+        """
+        Check if feet are within threshold distance of their targets
+        Returns: Boolean tensor of shape (num_envs,)
+        """
+        distances = torch.norm(feet_positions - target_positions, dim=-1)  # Shape: (num_envs, num_feet)
+        return torch.all(distances < threshold, dim=-1)  # Shape: (num_envs,)
