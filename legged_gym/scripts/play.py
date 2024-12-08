@@ -46,11 +46,13 @@ def play(args):
     print("initialized policy")
 
     num_feet = len(env.feet_indices)
-    target_positions = torch.zeros((env.num_envs, num_feet, 3), device=env.device)
+    target_positions = torch.zeros((env.num_envs, num_feet, 3), 
+                                 dtype=torch.float32, device=env.device)
     # Set some example target positions
     for i in range(env.num_envs):
         for j in range(num_feet):
-            target_positions[i, j] = torch.tensor([0.3 * (j-1), 0.2 * (j-1), 0], device=env.device)
+            target_positions[i, j] = torch.tensor([0.3 * (j-1), 0.2 * (j-1), 0], 
+                                                dtype=torch.float32, device=env.device)
     env.update_target_positions(target_positions)
     
     # export policy as a jit module (used to run it from C++)

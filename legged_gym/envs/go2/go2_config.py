@@ -71,5 +71,9 @@ class GO2RoughCfgPPO( LeggedRobotCfgPPO ):
     class runner( LeggedRobotCfgPPO.runner ):
         run_name = ''
         experiment_name = 'rough_go2'
+    class policy(LeggedRobotCfgPPO.policy):
+        actor_hidden_dims = [512, 256, 128]  # Keep the hidden layers the same
+        critic_hidden_dims = [512, 256, 128]  # Keep the hidden layers the same
+        # The input layer will automatically adjust to match observation size
 
   

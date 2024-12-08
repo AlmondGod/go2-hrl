@@ -11,6 +11,8 @@ import torch
 from torch import Tensor
 from typing import Tuple, Dict
 
+torch.set_default_tensor_type(torch.FloatTensor)
+
 from legged_gym import LEGGED_GYM_ROOT_DIR
 from legged_gym.envs.base.base_task import BaseTask
 from legged_gym.utils.math import wrap_to_pi
@@ -260,9 +262,9 @@ class LeggedRobot(BaseTask):
         self.base_pos[:] = self.root_states[:, 0:3]
         self.base_quat[:] = self.root_states[:, 3:7]
         self.rpy[:] = get_euler_xyz_in_tensor(self.base_quat[:])
-        self.base_lin_vel[:] = quat_rotate_inverse(self.base_quat, self.root_states[:, 7:10])
-        self.base_ang_vel[:] = quat_rotate_inverse(self.base_quat, self.root_states[:, 10:13])
-        self.projected_gravity[:] = quat_rotate_inverse(self.base_quat, self.gravity_vec)
+        self.base_lin_vel[:] = quat_rotate_inverse(self.base_quat, self.root_states[:, 7:10]).to(dtype=torch.float32)
+        self.base_ang_vel[:] = quat_rotate_inverse(self.base_quat, self.root_states[:, 10:13]).to(dtype=torch.float32)
+        self.projected_gravity[:] = quat_rotate_inverse(self.base_quat, self.gravity_vec).to(dtype=torch.float32)
 
         self._post_physics_step_callback()
 
@@ -343,33 +345,18 @@ class LeggedRobot(BaseTask):
     def compute_observations(self):
         """ Computes observations
         """
-        self.obs_buf = torch.cat((
-            self.base_lin_vel * self.obs_scales.lin_vel,
-            self.base_ang_vel * self.obs_scales.ang_vel,
-            self.projected_gravity,
-            self.commands[:, :3] * self.commands_scale,
-            (self.dof_pos - self.default_dof_pos) * self.obs_scales.dof_pos,
-            self.dof_vel * self.obs_scales.dof_vel,
-            self.actions
-        ), dim=-1)
-
-        # Reshape target positions to match batch size and apply scaling
-        # Assuming target_positions_one/two are [num_envs, num_feet, 3]
-        target_pos_one = self.target_positions_one.reshape(self.num_envs, -1)  # Flatten to [num_envs, num_feet*3]
-        target_pos_two = self.target_positions_two.reshape(self.num_envs, -1)  # Flatten to [num_envs, num_feet*3]
+        obs = torch.cat([
+            self._ensure_float32(self.base_lin_vel * self.obs_scales.lin_vel),
+            self._ensure_float32(self.base_ang_vel * self.obs_scales.ang_vel),
+            self._ensure_float32(self.projected_gravity),
+            self._ensure_float32(self.commands[:, :3] * self.commands_scale),
+            self._ensure_float32(self.dof_pos - self.default_dof_pos) * self.obs_scales.dof_pos,
+            self._ensure_float32(self.dof_vel * self.obs_scales.dof_vel),
+            self._ensure_float32(self.actions)
+        ], dim=-1)
         
-        # Apply scaling
-        scaled_target_one = target_pos_one * self.obs_scales.target_positions
-        scaled_target_two = target_pos_two * self.obs_scales.target_positions
-        
-        # Concatenate with observation buffer
-        self.obs_buf = torch.cat((
-            self.obs_buf,
-            scaled_target_one,
-            scaled_target_two
-        ), dim=-1)
-
-        return self.obs_buf
+        print(f"Observation shape: {obs.shape}")  # Debug print
+        return obs
 
     def create_sim(self):
         """ Creates simulation, terrain and evironments
@@ -644,24 +631,24 @@ class LeggedRobot(BaseTask):
         self.noise_scale_vec = self._get_noise_scale_vec(self.cfg)
         self.gravity_vec = to_torch(get_axis_params(-1., self.up_axis_idx), device=self.device).repeat((self.num_envs, 1))
         self.forward_vec = to_torch([1., 0., 0.], device=self.device).repeat((self.num_envs, 1))
-        self.torques = torch.zeros(self.num_envs, self.num_actions, dtype=torch.float, device=self.device, requires_grad=False)
-        self.p_gains = torch.zeros(self.num_actions, dtype=torch.float, device=self.device, requires_grad=False)
-        self.d_gains = torch.zeros(self.num_actions, dtype=torch.float, device=self.device, requires_grad=False)
-        self.actions = torch.zeros(self.num_envs, self.num_actions, dtype=torch.float, device=self.device, requires_grad=False)
-        self.last_actions = torch.zeros(self.num_envs, self.num_actions, dtype=torch.float, device=self.device, requires_grad=False)
+        self.torques = torch.zeros(self.num_envs, self.num_actions, dtype=torch.float32, device=self.device, requires_grad=False)
+        self.p_gains = torch.zeros(self.num_actions, dtype=torch.float32, device=self.device, requires_grad=False)
+        self.d_gains = torch.zeros(self.num_actions, dtype=torch.float32, device=self.device, requires_grad=False)
+        self.actions = torch.zeros(self.num_envs, self.num_actions, dtype=torch.float32, device=self.device, requires_grad=False)
+        self.last_actions = torch.zeros(self.num_envs, self.num_actions, dtype=torch.float32, device=self.device, requires_grad=False)
         self.last_dof_vel = torch.zeros_like(self.dof_vel)
         self.last_root_vel = torch.zeros_like(self.root_states[:, 7:13])
-        self.commands = torch.zeros(self.num_envs, self.cfg.commands.num_commands, dtype=torch.float, device=self.device, requires_grad=False) # x vel, y vel, yaw vel, heading
-        self.commands_scale = torch.tensor([self.obs_scales.lin_vel, self.obs_scales.lin_vel, self.obs_scales.ang_vel], device=self.device, requires_grad=False,) # TODO change this
-        self.feet_air_time = torch.zeros(self.num_envs, self.feet_indices.shape[0], dtype=torch.float, device=self.device, requires_grad=False)
+        self.commands = torch.zeros(self.num_envs, self.cfg.commands.num_commands, dtype=torch.float32, device=self.device, requires_grad=False) # x vel, y vel, yaw vel, heading
+        self.commands_scale = torch.tensor([self.obs_scales.lin_vel, self.obs_scales.lin_vel, self.obs_scales.ang_vel], dtype=torch.float32, device=self.device, requires_grad=False)
+        self.feet_air_time = torch.zeros(self.num_envs, self.feet_indices.shape[0], dtype=torch.float32, device=self.device, requires_grad=False)
         self.last_contacts = torch.zeros(self.num_envs, len(self.feet_indices), dtype=torch.bool, device=self.device, requires_grad=False)
-        self.base_lin_vel = quat_rotate_inverse(self.base_quat, self.root_states[:, 7:10])
-        self.base_ang_vel = quat_rotate_inverse(self.base_quat, self.root_states[:, 10:13])
-        self.projected_gravity = quat_rotate_inverse(self.base_quat, self.gravity_vec)
+        self.base_lin_vel = quat_rotate_inverse(self.base_quat, self.root_states[:, 7:10]).to(dtype=torch.float32)
+        self.base_ang_vel = quat_rotate_inverse(self.base_quat, self.root_states[:, 10:13]).to(dtype=torch.float32)
+        self.projected_gravity = quat_rotate_inverse(self.base_quat, self.gravity_vec).to(dtype=torch.float32)
       
 
         # joint positions offsets and PD gains
-        self.default_dof_pos = torch.zeros(self.num_dof, dtype=torch.float, device=self.device, requires_grad=False)
+        self.default_dof_pos = torch.zeros(self.num_dof, dtype=torch.float32, device=self.device, requires_grad=False)
         for i in range(self.num_dofs):
             name = self.dof_names[i]
             angle = self.cfg.init_state.default_joint_angles[name]
@@ -701,7 +688,7 @@ class LeggedRobot(BaseTask):
             self.reward_functions.append(getattr(self, name))
 
         # reward episode sums
-        self.episode_sums = {name: torch.zeros(self.num_envs, dtype=torch.float, device=self.device, requires_grad=False)
+        self.episode_sums = {name: torch.zeros(self.num_envs, dtype=torch.float32, device=self.device, requires_grad=False)
                              for name in self.reward_scales.keys()}
 
     def _create_ground_plane(self):
@@ -1147,3 +1134,8 @@ class LeggedRobot(BaseTask):
         """
         distances = torch.norm(feet_positions - target_positions, dim=-1)  # Shape: (num_envs, num_feet)
         return torch.all(distances < threshold, dim=-1)  # Shape: (num_envs,)
+
+    def _ensure_float32(self, tensor):
+        if tensor.dtype != torch.float32:
+            return tensor.to(dtype=torch.float32)
+        return tensor
