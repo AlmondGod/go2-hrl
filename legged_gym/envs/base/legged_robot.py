@@ -47,7 +47,10 @@ class LeggedRobot(BaseTask):
         self._prepare_reward_function()
         self.init_done = True
 
+        self.immediate_heightfield = np.zeros((14, 14), dtype=np.int16)
+
         self.target_positions = self.trajectory_optimizer()
+        
        
     def trajectory_optimizer(self): # TODO: define other inputs if desired
         """
@@ -59,12 +62,23 @@ class LeggedRobot(BaseTask):
 
         # this is the heightfield:
         heightfield = self.terrain.height_field_raw.astype(np.int16)
+        print(f"heightfield shape: {heightfield.shape}")
+        print(f"heightfield: {heightfield}")
+        print(f"sum heightfield: {np.sum(heightfield)}")
 
+        heights_in_meters = self.immediate_heightfield * self.terrain.cfg.vertical_scale
+        print(f"heights_in_meters shape: {heights_in_meters.shape}")
+        print(f"heights_in_meters: {heights_in_meters}")
+        print(f"sum heights_in_meters: {np.sum(heights_in_meters)}")
+        
         # The horizontal scale (distance between points) : (currently 0.1 m)
         # The vertical scale (height multiplier) : (currently 0.005 m)
         # both defined in legged_robot_config.py
 
         return None
+
+# 0.56 x 0.56 
+# 14 x 14 numbers
 
     def step(self, actions):
         # TODO: maintain self.target_positions 
@@ -326,6 +340,13 @@ class LeggedRobot(BaseTask):
 
         if self.cfg.domain_rand.push_robots and  (self.common_step_counter % self.cfg.domain_rand.push_interval == 0):
             self._push_robots()
+
+        # Update local heightfield window
+        self._update_local_heightfield()
+
+        print(f"immediate_heightfield shape: {self.immediate_heightfield.shape}")
+        print(f"immediate_heightfield: {self.immediate_heightfield}")
+        print(f"sum immediate_heightfield: {np.sum(self.immediate_heightfield)}")
 
     def _resample_commands(self, env_ids):
         """ Randommly select commands of some environments
@@ -940,3 +961,35 @@ class LeggedRobot(BaseTask):
             positions: Tensor of shape (num_envs, num_feet, 3) containing target positions
         """
         self.target_positions = positions
+
+    def _update_local_heightfield(self):
+        """Updates self.immediate_heightfield with a 14x14 window of height values around the robot"""
+        # Get robot's current position in world coordinates
+        base_pos = self.root_states[0, 0:3]  # Using first env's robot position
+        
+        # Convert world coordinates to heightfield indices
+        # Note: Need to account for the border and terrain scaling
+        hf_row = int((base_pos[0] + self.terrain.cfg.border_size) / self.terrain.cfg.horizontal_scale)
+        hf_col = int((base_pos[1] + self.terrain.cfg.border_size) / self.terrain.cfg.horizontal_scale)
+        
+        # Define the window size (14x14)
+        window_size = 14
+        half_window = window_size // 2
+        
+        # Extract heightfield window, handling boundary conditions
+        row_start = max(0, hf_row - half_window)
+        row_end = min(self.terrain.height_field_raw.shape[0], hf_row + half_window)
+        col_start = max(0, hf_col - half_window)
+        col_end = min(self.terrain.height_field_raw.shape[1], hf_col + half_window)
+        
+        # Initialize the window with zeros
+        self.immediate_heightfield = np.zeros((window_size, window_size), dtype=np.int16)
+        
+        # Fill the available heightfield data
+        valid_rows = slice(max(0, half_window - hf_row), 
+                          min(window_size, window_size - (hf_row + half_window - self.terrain.height_field_raw.shape[0])))
+        valid_cols = slice(max(0, half_window - hf_col),
+                          min(window_size, window_size - (hf_col + half_window - self.terrain.height_field_raw.shape[1])))
+        
+        self.immediate_heightfield[valid_rows, valid_cols] = \
+            self.terrain.height_field_raw[row_start:row_end, col_start:col_end]
