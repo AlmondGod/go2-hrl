@@ -58,11 +58,80 @@ class LeggedRobot(BaseTask):
         self._prepare_reward_function()
         self.init_done = True
 
-        # target positions one starts at current leg locations
-        # self.target_positions_one = self.rigid_body_states[:, self.feet_indices, :3]  # Shape: (num_envs, num_feet, 3)
-        # self.target_positions_two = self.trajectory_optimizer()
-        # self.active_pair = 1  # Start with pair 1 (FR+BL)
-       
+        # Pre-computed trajectory
+        self.reference_footsteps = None  # Will store [num_steps, num_feet, 3]
+        self.reference_phase_timings = None
+        self.reference_contact_schedule = None
+        self.current_step_index = torch.zeros(self.num_envs, dtype=torch.long, device=self.device)
+
+        self._generate_reference_trajectory()
+
+    def _generate_reference_trajectory(self):
+        """Generate a single forward-moving reference trajectory at initialization"""
+        # Number of steps we want to pre-compute (e.g., 40 steps to cover ~12 meters)
+        num_steps = 40
+        step_size = 0.3  # 30cm forward per step
+        
+        # Try using trajectory optimizer first
+        success = False
+        optimal_positions = None
+        phase_timing = None
+        contact_schedule = None
+        
+        # Try optimization for first few steps
+        try:
+            optimal_positions, phase_timing, contact_schedule = self.trajectory_optimizer(0)
+            success = True
+        except:
+            print("Initial trajectory optimization failed, falling back to platform-based planning")
+        
+        # Initialize storage for full trajectory
+        self.reference_footsteps = torch.zeros((num_steps, 4, 3), device=self.device)
+        self.reference_phase_timings = torch.zeros((num_steps, 5), device=self.device)  # Assuming 5 phase timings
+        self.reference_contact_schedule = torch.zeros((num_steps, 4, 4), device=self.device, dtype=torch.bool)
+        
+        if success:
+            # First step is from optimizer
+            self.reference_footsteps[0] = optimal_positions
+            self.reference_phase_timings[0] = phase_timing
+            self.reference_contact_schedule[0] = contact_schedule
+            
+            # Generate subsequent steps by shifting forward
+            for i in range(1, num_steps):
+                self.reference_footsteps[i] = self.reference_footsteps[i-1].clone()
+                self.reference_footsteps[i, :, 0] += step_size
+                self.reference_phase_timings[i] = phase_timing
+                self.reference_contact_schedule[i] = contact_schedule
+        else:
+            # Fallback: Generate trajectory based on terrain height
+            for i in range(num_steps):
+                # Get terrain heights at potential foot positions
+                x_pos = i * step_size
+                for foot in range(4):
+                    # Default foot offsets (adjust these based on robot dimensions)
+                    y_offset = 0.15 if foot % 2 == 0 else -0.15
+                    
+                    # Sample terrain height at this position
+                    x_idx = int((x_pos + self.terrain.cfg.border_size) / self.terrain.cfg.horizontal_scale)
+                    y_idx = int((y_offset + self.terrain.cfg.border_size) / self.terrain.cfg.horizontal_scale)
+                    
+                    if 0 <= x_idx < self.height_samples.shape[0] and 0 <= y_idx < self.height_samples.shape[1]:
+                        height = self.height_samples[x_idx, y_idx] * self.terrain.cfg.vertical_scale
+                        self.reference_footsteps[i, foot] = torch.tensor([x_pos, y_offset, height], device=self.device)
+                    else:
+                        # If out of bounds, use last valid height
+                        self.reference_footsteps[i, foot] = self.reference_footsteps[i-1, foot].clone()
+                        self.reference_footsteps[i, foot, 0] += step_size
+                
+                # Use default timing and contact patterns
+                self.reference_phase_timings[i] = torch.tensor([0, 0.4, 0.8, 1.2, 1.6], device=self.device)
+                self.reference_contact_schedule[i] = torch.tensor([
+                    [1, 0, 1, 1],
+                    [1, 1, 1, 0],
+                    [0, 1, 1, 1],
+                    [1, 1, 0, 1]
+                ], device=self.device)
+
     def trajectory_optimizer(self, index):
         """
         Uses TAMOLS optimization to find optimal foot positions given the current state and terrain.
@@ -90,9 +159,9 @@ class LeggedRobot(BaseTask):
             self.root_states[index, 11].cpu().numpy().astype(np.float64),  # angular y
             self.root_states[index, 12].cpu().numpy().astype(np.float64)   # angular z
         ])
-
+        
         # Set reference velocity and angular momentum
-        tmls.ref_vel = np.array([0.25, 0, 0])  # Example: move forward at 0.1 m/s
+        tmls.ref_vel = np.array([0.5, 0, 0])  # Increase forward velocity to 0.5 m/s
         tmls.ref_angular_momentum = np.array([0, 0, 0])  # No angular momentum
         
         # Set gait pattern
@@ -139,7 +208,7 @@ class LeggedRobot(BaseTask):
         # WARM START
         # Warm start the continuous variable p to start at the point that would perfectly satisfy the kinematic cost
         l_des = np.array([0., 0., tmls.h_des])
-        
+
         p_B = tmls.base_pose[:3]
         phi_B = tmls.base_pose[3:6]
         R_B = get_R_B_numerical(phi_B)
@@ -199,19 +268,19 @@ class LeggedRobot(BaseTask):
         foot_contacts = (self.contact_forces[:, self.feet_indices, 2] > 1.).to(self.device)
         
         # Track feet leaving ground and making new contacts
-        self.new_contacts = foot_contacts & ~self.last_contacts  # Detect new touchdowns
-
+        self.new_contacts = foot_contacts & ~self.last_contacts
+        
         # Update completed steps based on new contacts
-        self.foot_completed_step |= self.new_contacts  # Mark feet as completed when they make new contact
+        self.foot_completed_step |= self.new_contacts
         
         # Check if all feet have completed a new step
         all_feet_completed = torch.all(self.foot_completed_step, dim=1)
-        env_ids_for_optimization = torch.where(all_feet_completed)[0]
+        env_ids_for_update = torch.where(all_feet_completed)[0]
         
-        if len(env_ids_for_optimization) > 0:
+        if len(env_ids_for_update) > 0:
             # Only run optimizer during inference
             if self.cfg.env.test:
-                for i in env_ids_for_optimization:
+                for i in env_ids_for_update:
                     # Run optimizer to get new footholds and contact schedule
                     optimal_footholds, phase_timing, contact_schedule = self.trajectory_optimizer(i)
 
@@ -220,10 +289,10 @@ class LeggedRobot(BaseTask):
                     self.phase_timings[i] = phase_timing
                     self.contact_schedule[i] = contact_schedule
             else:
-                current_positions = self.rigid_body_states[env_ids_for_optimization][:, self.feet_indices, :3] # [num_envs, 4, 3]
+                current_positions = self.rigid_body_states[env_ids_for_update][:, self.feet_indices, :3] # [num_envs, 4, 3]
                 # Generate random forward steps between 0.1 and 0.4 meters
                 # Shape will be [num_envs, 1, 1] to broadcast correctly
-                random_steps = (torch.rand(len(env_ids_for_optimization), len(self.feet_indices), device=self.device) * 0.3 + 0.1)  # rand gives [0,1), we scale to [0.1,0.4)
+                random_steps = (torch.rand(len(env_ids_for_update), len(self.feet_indices), device=self.device) * 0.3 + 0.1)  # rand gives [0,1), we scale to [0.1,0.4)
                                 
                 # Move each foot forward by 0.1m-0.4m stochastically
                 new_positions = current_positions.clone()
@@ -253,14 +322,14 @@ class LeggedRobot(BaseTask):
                 ], device=self.device, dtype=torch.bool)
                 
                 # Update targets and schedule
-                self.target_positions[env_ids_for_optimization] = new_positions
-                self.phase_timings[env_ids_for_optimization] = default_phase_timing.unsqueeze(0).expand(len(env_ids_for_optimization), -1)
-                self.contact_schedule[env_ids_for_optimization] = default_contact_schedule.unsqueeze(0).expand(len(env_ids_for_optimization), -1, -1)
+                self.target_positions[env_ids_for_update] = new_positions
+                self.phase_timings[env_ids_for_update] = default_phase_timing.unsqueeze(0).expand(len(env_ids_for_update), -1)
+                self.contact_schedule[env_ids_for_update] = default_contact_schedule.unsqueeze(0).expand(len(env_ids_for_update), -1, -1)
             
             # Reset tracking variables
-            self.foot_completed_step[env_ids_for_optimization] = False
-            self.current_phase[env_ids_for_optimization] = 0
-            self.phase_time[env_ids_for_optimization] = 0
+            self.foot_completed_step[env_ids_for_update] = False
+            self.current_phase[env_ids_for_update] = 0
+            self.phase_time[env_ids_for_update] = 0
         
         # Update phase timing
         self.phase_time += self.dt
@@ -1100,8 +1169,8 @@ class LeggedRobot(BaseTask):
         valid_contacts = self.new_contacts & desired_contacts.bool() & ~self.foot_completed_step
         reward = tracking_error * valid_contacts.float()
         
-        return reward.sum(dim=-1)
-    
+        return reward.sum(dim=-1)    
+
     # for base PPO encouraging x and y positive movement and same z (not falling into the void)
     def _reward_xy_progress(self):
         # Reward for making progress in x and y directions

@@ -110,35 +110,19 @@ class LeggedRobotCfg(BaseConfig):
 
     class rewards:
         class scales:
-            # Core task
-            foothold_tracking = 40.0    # New primary objective
+            foothold_tracking = 40.0    # Primary objective
+            orientation = -2.0          # Keep upright
+            lin_vel_z = -2.0           # Minimize vertical motion
+            ang_vel_xy = -0.5          # Limit angular velocity
+            collision = -2.0           # Collision penalty
+            torques = -0.00001         # Small torque penalty
+            dof_vel = -0.0001          # Joint velocity smoothness
             
-            # Zero out velocity tracking since we follow footholds
+            # Zero out unused rewards
             tracking_lin_vel = 0.0
             tracking_ang_vel = 0.0
-            
-            # Stability penalties
-            lin_vel_z = -2.0           # Keep from excessive vertical motion
-            ang_vel_xy = -0.5          # Limit angular velocity
-            orientation = -2.0          # Keep upright
-            
-            # Motion smoothness
-            torques = -0.00001         # Keep original small penalty
-            dof_vel = -0.0001          # Small penalty for smoothness
-            dof_acc = -2.5e-7          # Keep original
-            
-            # Zero out unused
-            base_height = 0.0 
+            base_height = 0.0
             feet_air_time = 0.0
-            
-            # Safety
-            collision = -2.0           # Increase collision penalty
-            stumble = -2.0        # Add stumble penalty
-            
-            # Movement smoothness
-            action_rate = -0.01        # Keep original
-            
-            # Zero out unused
             stand_still = 0.0
             termination = 0.0
 
