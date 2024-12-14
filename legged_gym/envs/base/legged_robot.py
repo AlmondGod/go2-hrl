@@ -21,11 +21,12 @@ from legged_gym.utils.helpers import class_to_dict
 from .legged_robot_config import LeggedRobotCfg
 from legged_gym.utils.terrain import Terrain
 from fetch.tamols.tamols import TAMOLSState, setup_variables
-from fetch.tamols.constraints import add_initial_constraints, add_kinematic_constraints, add_giac_constraints, add_friction_cone_constraints
+from fetch.tamols.constraints import add_initial_constraints, add_kinematic_constraints, add_giac_constraints, add_friction_cone_constraints, add_dynamics_constraints
 from fetch.tamols.costs import add_tracking_cost, add_foothold_on_ground_cost, add_nominal_kinematic_cost, add_base_pose_alignment_cost, add_edge_avoidance_cost
 from fetch.tamols.map_processing import process_height_maps
 from pydrake.solvers import SnoptSolver
 from fetch.tamols.plotting_helpers import plot_optimal_solutions_interactive, save_optimal_solutions
+from fetch.tamols.helpers import get_R_B_numerical
 
 class LeggedRobot(BaseTask):
     def __init__(self, cfg: LeggedRobotCfg, sim_params, physics_engine, sim_device, headless):
@@ -41,6 +42,8 @@ class LeggedRobot(BaseTask):
             device_id (int): 0, 1, ...
             headless (bool): Run without rendering if True
         """
+        self.map_size = 27
+        self.cell_size = 0.05
         self.cfg = cfg
         self.sim_params = sim_params
         self.height_samples = None
@@ -55,14 +58,12 @@ class LeggedRobot(BaseTask):
         self._prepare_reward_function()
         self.init_done = True
 
-        self.immediate_heightfield = np.zeros((14, 14), dtype=np.int16)
-
         # target positions one starts at current leg locations
-        self.target_positions_one = self.rigid_body_states[:, self.feet_indices, :3]  # Shape: (num_envs, num_feet, 3)
-        self.target_positions_two = self.trajectory_optimizer()
-        self.active_pair = 1  # Start with pair 1 (FR+BL)
+        # self.target_positions_one = self.rigid_body_states[:, self.feet_indices, :3]  # Shape: (num_envs, num_feet, 3)
+        # self.target_positions_two = self.trajectory_optimizer()
+        # self.active_pair = 1  # Start with pair 1 (FR+BL)
        
-    def trajectory_optimizer(self):
+    def trajectory_optimizer(self, index):
         """
         Uses TAMOLS optimization to find optimal foot positions given the current state and terrain.
         Returns: Tensor of shape (num_envs, num_feet, 3) containing target positions
@@ -72,52 +73,50 @@ class LeggedRobot(BaseTask):
         
         # Set current state
         tmls.base_pose = np.array([
-            self.root_states[0, 0].cpu().numpy(),  # x
-            self.root_states[0, 1].cpu().numpy(),  # y
-            self.root_states[0, 2].cpu().numpy(),  # z
-            self.rpy[0, 0].cpu().numpy(),          # roll
-            self.rpy[0, 1].cpu().numpy(),          # pitch
-            self.rpy[0, 2].cpu().numpy()           # yaw
+            self.root_states[index, 0].cpu().numpy().astype(np.float64),  # x
+            self.root_states[index, 1].cpu().numpy().astype(np.float64),  # y
+            self.root_states[index, 2].cpu().numpy().astype(np.float64),  # z
+            self.rpy[index, 0].cpu().numpy().astype(np.float64),          # roll
+            self.rpy[index, 1].cpu().numpy().astype(np.float64),          # pitch
+            self.rpy[index, 2].cpu().numpy().astype(np.float64)           # yaw
         ])
         
         # Set base velocity (linear and angular)
         tmls.base_vel = np.array([
-            self.root_states[0, 7].cpu().numpy(),   # linear x
-            self.root_states[0, 8].cpu().numpy(),   # linear y
-            self.root_states[0, 9].cpu().numpy(),   # linear z
-            self.root_states[0, 10].cpu().numpy(),  # angular x
-            self.root_states[0, 11].cpu().numpy(),  # angular y
-            self.root_states[0, 12].cpu().numpy()   # angular z
+            self.root_states[index, 7].cpu().numpy().astype(np.float64),   # linear x
+            self.root_states[index, 8].cpu().numpy().astype(np.float64),   # linear y
+            self.root_states[index, 9].cpu().numpy().astype(np.float64),   # linear z
+            self.root_states[index, 10].cpu().numpy().astype(np.float64),  # angular x
+            self.root_states[index, 11].cpu().numpy().astype(np.float64),  # angular y
+            self.root_states[index, 12].cpu().numpy().astype(np.float64)   # angular z
         ])
 
         # Set reference velocity and angular momentum
-        tmls.ref_vel = np.array([0.1, 0, 0])  # Example: move forward at 0.1 m/s
+        tmls.ref_vel = np.array([0.25, 0, 0])  # Example: move forward at 0.1 m/s
         tmls.ref_angular_momentum = np.array([0, 0, 0])  # No angular momentum
         
         # Set gait pattern
         tmls.gait_pattern = {
-            'phase_timing': [0, 0.4, 0.8, 1.2, 1.6, 2.0],
+            'phase_timing': [0, 0.4, 0.8, 1.2, 1.6],
             'contact_states': [
-                [1, 1, 1, 1],
-                [1, 0, 1, 0],
-                [1, 1, 1, 1],
-                [0, 1, 0, 1],
-                [1, 1, 1, 1],
+                [1, 0, 1, 1], 
+                [1, 1, 1, 0], 
+                [0, 1, 1, 1], 
+                [1, 1, 0, 1], 
             ],
             'at_des_position': [
-                [0, 0, 0, 0],
-                [0, 0, 0, 0],
-                [0, 1, 0, 1],
-                [0, 1, 0, 1],
+                [0, 1, 0, 0], 
+                [0, 1, 0, 1], 
+                [1, 1, 0, 1], 
                 [1, 1, 1, 1],
             ],
         }
 
         # Set current foot positions
-        tmls.p_meas = self.rigid_body_states[0, self.feet_indices, :3].cpu().numpy()
+        tmls.p_meas = self.rigid_body_states[index, self.feet_indices, :3].cpu().numpy()
 
         # Process heightfield
-        elevation_map = self.immediate_heightfield.astype(np.float32)
+        elevation_map = self.immediate_heightfields[index].cpu().numpy().astype(np.float32)
         h_s1, h_s2, gradients = process_height_maps(elevation_map)
         
         # Set height maps and gradients
@@ -132,92 +131,145 @@ class LeggedRobot(BaseTask):
         setup_variables(tmls)
 
         # Temp constraint
-        for leg_idx, pos in enumerate([[0.4, 0.1, 0], [0.4, -0.1, 0], [0, 0.1, 0], [0, -0.1, 0]]):
-            for dim in range(2): # just x, y pos (z handled by foot on ground cost
-                c = tmls.prog.AddLinearConstraint(tmls.p[leg_idx, dim] == pos[dim])
-                tmls.test_constraints.append(c)
+        # for leg_idx, pos in enumerate([[0.4, 0.1, 0], [0.4, -0.1, 0], [0, 0.1, 0], [0, -0.1, 0]]):
+        #     for dim in range(2): # just x, y pos (z handled by foot on ground cost
+        #         c = tmls.prog.AddLinearConstraint(tmls.p[leg_idx, dim] == pos[dim])
+        #         tmls.test_constraints.append(c)
 
-        # Add constraints
+        # WARM START
+        # Warm start the continuous variable p to start at the point that would perfectly satisfy the kinematic cost
+        l_des = np.array([0., 0., tmls.h_des])
+        
+        p_B = tmls.base_pose[:3]
+        phi_B = tmls.base_pose[3:6]
+        R_B = get_R_B_numerical(phi_B)
+        # TODO: try the warm start with a bump forward?
+        for i in range(4):
+            base_minus_leg = p_B + R_B.dot(tmls.hip_offsets[i] * np.array([1.3, 1.7, 0])) - l_des
+            tmls.prog.SetInitialGuess(tmls.p[i], base_minus_leg)
+
         add_initial_constraints(tmls)
-        add_kinematic_constraints(tmls)
-        # add_giac_constraints(tmls)
-        # add_friction_cone_constraints(tmls)
+        add_dynamics_constraints(tmls)
+        add_kinematic_constraints(tmls) # for some reason problem becomes infeasible without this
+        add_giac_constraints(tmls)
+        add_friction_cone_constraints(tmls)
 
-        # Add costs
+        
+        # COSTS
+        add_tracking_cost(tmls)
         add_foothold_on_ground_cost(tmls)
-        # add_nominal_kinematic_cost(tmls)
+        add_nominal_kinematic_cost(tmls)
         # add_base_pose_alignment_cost(tmls)
+        # add_edge_avoidance_cost(tmls)
+        # add_previous_solution_cost(tmls)
+        # add_smoothness_cost(tmls)
 
         # Solve optimization
         solver = SnoptSolver()
+
+        tmls.prog.SetSolverOption(SnoptSolver().solver_id(), "Major feasibility tolerance", 1e-6)
+        tmls.prog.SetSolverOption(SnoptSolver().solver_id(), "Major optimality tolerance", 2e-2)
+        tmls.prog.SetSolverOption(SnoptSolver().solver_id(), "Major iterations limit", 100)
+
         tmls.result = solver.Solve(tmls.prog)
-
-        # Check if optimization succeeded before accessing result
-        if not tmls.result.is_success():
-            print("Optimization failed, using fallback strategy")
-            current_positions = self.rigid_body_states[:, self.feet_indices, :3]
-            new_positions = current_positions.clone()
-            new_positions[:, :, 0] += 0.1  # Move 10cm forward
-            return new_positions
-
-        # Only try to get solution if optimization succeeded
-        tmls.optimal_footsteps = tmls.result.GetSolution(tmls.p)
-        num_phases = len(tmls.gait_pattern['phase_timing']) - 1
-        tmls.optimal_spline_coeffs = [tmls.result.GetSolution(tmls.spline_coeffs[i]) for i in range(num_phases)]
-
-        plot_optimal_solutions_interactive(tmls)
-        save_optimal_solutions(tmls)
 
         # Extract solution
         if tmls.result.is_success():
             optimal_footsteps = tmls.result.GetSolution(tmls.p)
             # Convert to tensor and repeat for all environments
             optimal_positions = torch.tensor(optimal_footsteps, device=self.device)
-            optimal_positions = optimal_positions.unsqueeze(0).repeat(self.num_envs, 1, 1)
-            return optimal_positions
+            phase_timing = torch.tensor(tmls.gait_pattern['phase_timing'], device=self.device)
+            contact_schedule = torch.tensor(tmls.gait_pattern['contact_states'], device=self.device)
+
+            # num_phases = len(tmls.gait_pattern['phase_timing']) - 1
+            # optimal_spline_coeffs = [tmls.result.GetSolution(tmls.spline_coeffs[i]) for i in range(num_phases)]
+            return optimal_positions, phase_timing, contact_schedule
         else:
             # If optimization fails, return current positions plus small forward step
             print("Optimization failed, using fallback strategy")
-            current_positions = self.rigid_body_states[:, self.feet_indices, :3]
+            current_positions = self.rigid_body_states[index, self.feet_indices, :3]
             new_positions = current_positions.clone()
-            new_positions[:, :, 0] += 0.1  # Move 10cm forward
-            return new_positions
+            new_positions[:, 0] += 0.1  # Move 10cm forward
+            phase_timing = torch.tensor(tmls.gait_pattern['phase_timing'], device=self.device)
+            contact_schedule = torch.tensor(tmls.gait_pattern['contact_states'], device=self.device)
+            return new_positions, phase_timing, contact_schedule
 
     def step(self, actions):
-        # Get current foot positions
-        current_feet_pos = self.rigid_body_states[:, self.feet_indices, :3]
+        # Get current foot contacts
+        foot_contacts = (self.contact_forces[:, self.feet_indices, 2] > 1.).to(self.device)
         
-        # Define diagonal pairs 
-        pair1_indices = torch.tensor([0, 3], device=self.device)  # LF, RH
-        pair2_indices = torch.tensor([1, 2], device=self.device)  # RF, LH
+        # Track feet leaving ground and making new contacts
+        self.new_contacts = foot_contacts & ~self.last_contacts  # Detect new touchdowns
+
+        # Update completed steps based on new contacts
+        self.foot_completed_step |= self.new_contacts  # Mark feet as completed when they make new contact
         
-        # Check if active pair reached their targets # NOTE:is equals to strong of a constaint?
-        if self.active_pair == 1:
-            active_indices = pair1_indices
-            check_positions = current_feet_pos[:, pair1_indices]
-            check_targets = self.target_positions_two[:, pair1_indices]
-        else:
-            active_indices = pair2_indices
-            check_positions = current_feet_pos[:, pair2_indices]
-            check_targets = self.target_positions_two[:, pair2_indices]
+        # Check if all feet have completed a new step
+        all_feet_completed = torch.all(self.foot_completed_step, dim=1)
+        env_ids_for_optimization = torch.where(all_feet_completed)[0]
         
-        # Check if feet reached targets
-        feet_reached = self._check_feet_at_target(check_positions, check_targets)
-        
-        # If feet reached targets, swap positions and calculate new targets
-        if torch.any(feet_reached):
-            # Update environments where feet reached targets
-            env_ids = torch.where(feet_reached)[0]
+        if len(env_ids_for_optimization) > 0:
+            # Only run optimizer during inference
+            if self.cfg.env.test:
+                for i in env_ids_for_optimization:
+                    # Run optimizer to get new footholds and contact schedule
+                    optimal_footholds, phase_timing, contact_schedule = self.trajectory_optimizer(i)
+
+                    # Update targets and schedule for envs that completed all steps
+                    self.target_positions[i] = optimal_footholds
+                    self.phase_timings[i] = phase_timing
+                    self.contact_schedule[i] = contact_schedule
+            else:
+                current_positions = self.rigid_body_states[env_ids_for_optimization][:, self.feet_indices, :3] # [num_envs, 4, 3]
+                # Generate random forward steps between 0.1 and 0.4 meters
+                # Shape will be [num_envs, 1, 1] to broadcast correctly
+                random_steps = (torch.rand(len(env_ids_for_optimization), len(self.feet_indices), device=self.device) * 0.3 + 0.1)  # rand gives [0,1), we scale to [0.1,0.4)
+                                
+                # Move each foot forward by 0.1m-0.4m stochastically
+                new_positions = current_positions.clone()
+                new_positions[:, :, 0] += random_steps  # Add 0.1m to x coordinate
+                
+                # Convert world coordinates to terrain indices
+                terrain_resolution = 1.0 / self.terrain.cfg.horizontal_scale
+                x_idx = (new_positions[:, :, 0] * terrain_resolution).long()
+                y_idx = (new_positions[:, :, 1] * terrain_resolution).long()
+                
+                # Clamp indices to terrain bounds
+                x_idx = torch.clamp(x_idx, 0, self.height_samples.shape[0]-1)
+                y_idx = torch.clamp(y_idx, 0, self.height_samples.shape[1]-1)
+                
+                # Get height at each new position
+                heights = self.height_samples[x_idx, y_idx] * self.terrain.cfg.vertical_scale
+                heights = torch.clamp(heights, min=-0.05) # Clamp to prevent foothold targets in pits
+                new_positions[:, :, 2] = heights
+
+                # Use default phase timing and contact schedule during training
+                default_phase_timing = torch.tensor([0, 0.4, 0.8, 1.2, 1.6], device=self.device)
+                default_contact_schedule = torch.tensor([
+                    [1, 0, 1, 1],
+                    [1, 1, 1, 0],
+                    [0, 1, 1, 1],
+                    [1, 1, 0, 1]
+                ], device=self.device, dtype=torch.bool)
+                
+                # Update targets and schedule
+                self.target_positions[env_ids_for_optimization] = new_positions
+                self.phase_timings[env_ids_for_optimization] = default_phase_timing.unsqueeze(0).expand(len(env_ids_for_optimization), -1)
+                self.contact_schedule[env_ids_for_optimization] = default_contact_schedule.unsqueeze(0).expand(len(env_ids_for_optimization), -1, -1)
             
-            # Swap positions (pos2 becomes pos1)
-            self.target_positions_one[env_ids] = self.target_positions_two[env_ids]
-            
-            # Calculate new target positions
-            new_targets = self.trajectory_optimizer() # DO WE HAVE TO DO THIS JUST YET? (if only half way through the traj)
-            self.target_positions_two[env_ids] = new_targets[env_ids]
-            
-            # Switch active pair
-            self.active_pair = 3 - self.active_pair  # Toggles between 1 and 2
+            # Reset tracking variables
+            self.foot_completed_step[env_ids_for_optimization] = False
+            self.current_phase[env_ids_for_optimization] = 0
+            self.phase_time[env_ids_for_optimization] = 0
+        
+        # Update phase timing
+        self.phase_time += self.dt
+        phase_completed = self.phase_time >= (self.phase_timings[torch.arange(self.num_envs), self.current_phase + 1] - self.phase_timings[torch.arange(self.num_envs), self.current_phase])
+        self.current_phase[phase_completed] = torch.clamp(self.current_phase[phase_completed] + 1, max=3)
+        self.phase_time[phase_completed] = 0
+        
+        # Store current contacts for next step
+        self.last_contacts = foot_contacts
         
         # Continue with normal step logic
         clip_actions = self.cfg.normalization.clip_actions
@@ -341,6 +393,43 @@ class LeggedRobot(BaseTask):
             rew = self._reward_termination() * self.reward_scales["termination"]
             self.rew_buf += rew
             self.episode_sums["termination"] += rew
+
+    
+    def _get_height_observation(self):
+        """Returns 10x10 grid local to the robot with simulator height map values - 0.1 m resolution"""
+        # Physical dimensions desired
+        samples_per_side = 10      # 10 x 10 grid (Affect observation space size)
+
+        # Get robot's current position in world coordinates
+        base_pos = self.root_states[:, 0:3]  # Using first env's robot position
+        
+        # Initialize the result grid
+        height_observation = torch.zeros((self.num_envs, samples_per_side, samples_per_side), dtype=torch.int16, device=self.device)
+
+        # Create meshgrid for sample positions
+        i, j = torch.meshgrid(torch.arange(samples_per_side, device=self.device), torch.arange(samples_per_side, device=self.device))
+
+        # Calculate world coordinates for each sample point
+        world_x = base_pos[:, 0, None, None] + (i - samples_per_side/2)
+        world_y = base_pos[:, 1, None, None] + (j - samples_per_side/2)
+
+        # Convert world coordinates to heightfield indices
+        hf_row = torch.floor((world_x + self.terrain.cfg.border_size) / self.terrain.cfg.horizontal_scale).to(torch.int64)
+        hf_col = torch.floor((world_y + self.terrain.cfg.border_size) / self.terrain.cfg.horizontal_scale).to(torch.int64)
+
+        # Create mask for valid indices
+        valid_mask = (hf_row >= 0) & (hf_row < self.height_samples.shape[0]) & \
+                    (hf_col >= 0) & (hf_col < self.height_samples.shape[1])
+
+        # Sample heights using advanced indexing
+        hf_row = torch.clamp(hf_row, 0, self.height_samples.shape[0] - 1)
+        hf_col = torch.clamp(hf_col, 0, self.height_samples.shape[1] - 1)
+        height_observation = torch.where(valid_mask, self.height_samples[hf_row, hf_col], height_observation)
+        height_observation = height_observation * self.terrain.cfg.vertical_scale
+
+        flattened = height_observation.reshape(self.num_envs, samples_per_side * samples_per_side)
+
+        return flattened
     
     def compute_observations(self):
         """ Computes observations
@@ -352,7 +441,10 @@ class LeggedRobot(BaseTask):
             self._ensure_float32(self.commands[:, :3] * self.commands_scale),
             self._ensure_float32(self.dof_pos - self.default_dof_pos) * self.obs_scales.dof_pos,
             self._ensure_float32(self.dof_vel * self.obs_scales.dof_vel),
-            self._ensure_float32(self.actions)
+            self._ensure_float32(self.actions),
+            self._ensure_float32(self.target_positions.view(self.num_envs, -1)),  # Flatten 4x3 target positions into 12D vector
+            self._ensure_float32(self.contact_schedule[torch.arange(self.num_envs), self.current_phase]),  # Current desired contacts (4D)
+            self._ensure_float32(torch.tensor(self._get_height_observation(), device=self.device))  # 81D
         ], dim=-1)
         
         return obs
@@ -624,6 +716,20 @@ class LeggedRobot(BaseTask):
         self.base_pos = self.root_states[:self.num_envs, 0:3]
         self.contact_forces = gymtorch.wrap_tensor(net_contact_forces).view(self.num_envs, -1, 3) # shape: num_envs, num_bodies, xyz axis
 
+        # Initialize heightmaps
+        self.immediate_heightfields = torch.zeros((self.num_envs, self.map_size, self.map_size), dtype=torch.int16, device=self.device, requires_grad=False)
+
+        # Initialize tracking variables for footstep optimization
+        self.foot_completed_step = torch.zeros(self.num_envs, len(self.feet_indices), dtype=torch.bool, device=self.device, requires_grad=False)
+        self.current_phase = torch.zeros(self.num_envs, dtype=torch.long, device=self.device, requires_grad=False)
+        self.phase_time = torch.zeros(self.num_envs, dtype=torch.float32, device=self.device, requires_grad=False)
+        self.new_contacts = torch.zeros(self.num_envs, len(self.feet_indices), dtype=torch.bool, device=self.device, requires_grad=False)
+        
+        # Initialize buffers for optimization results
+        self.target_positions = torch.zeros((self.num_envs, len(self.feet_indices), 3), dtype=torch.float32, device=self.device, requires_grad=False)
+        self.phase_timings = torch.zeros((self.num_envs, 5), dtype=torch.float32, device=self.device, requires_grad=False)  # Assuming 4 phases + end
+        self.contact_schedule = torch.zeros((self.num_envs, 4, len(self.feet_indices)), dtype=torch.bool, device=self.device, requires_grad=False)
+        
         # initialize some data used later on
         self.common_step_counter = 0
         self.extras = {}
@@ -759,7 +865,7 @@ class LeggedRobot(BaseTask):
         self.gym.add_triangle_mesh(self.sim, self.terrain.vertices.flatten(order='C'), self.terrain.triangles.flatten(order='C'), tm_params)  
         print("Trimesh added")
         self.height_samples = torch.tensor(self.terrain.heightsamples).view(self.terrain.tot_rows, self.terrain.tot_cols).to(self.device)
-        self.x_edge_mask = torch.tensor(self.terrain.x_edge_mask).view(self.terrain.tot_rows, self.terrain.tot_cols).to(self.device)
+        # self.x_edge_mask = torch.tensor(self.terrain.x_edge_mask).view(self.terrain.tot_rows, self.terrain.tot_cols).to(self.device)
 
     def _create_envs(self):
         """ Creates environments:
@@ -975,21 +1081,26 @@ class LeggedRobot(BaseTask):
         # Reward positive forward velocity
         return torch.clamp(forward_vel, min=0.0)
 
-    def _reward_target_dists(self):
+    def _reward_foothold_tracking(self):
         """
-        Rewards based on how close the current feet (foot_positions) are to target feet positions (self.target_positions)
+        Updated reward function that considers both position accuracy and timing
         """
-        foot_positions = self.rigid_body_states[:, self.feet_indices, :3]
-
-        distances = torch.norm(foot_positions - self.target_positions_one, dim=-1) + torch.norm(foot_positions - self.target_positions_two, dim=-1)  # shape (num_envs, num_feet)
-    
-        total_distance = torch.sum(distances, dim=1)  # shape (num_envs)
+        current_positions = self.rigid_body_states[:, self.feet_indices, :3]
         
-        # distance to reward (closer = higher reward)
-        # TODO: tune this (especially 0.1 scaling factor)
-        reward = torch.exp(-total_distance / 0.1)  
+        # Get desired contacts for current phase
+        max_phase = self.contact_schedule.shape[1] - 1
+        valid_phase = torch.clamp(self.current_phase, 0, max_phase)
+        desired_contacts = self.contact_schedule[torch.arange(self.num_envs), valid_phase]
         
-        return reward
+        # Position error (from paper)
+        epsilon = 1e-5
+        tracking_error = -torch.log(torch.norm(current_positions - self.target_positions, dim=-1)**2 + epsilon)
+        
+        # Combine position and timing rewards for new contacts
+        valid_contacts = self.new_contacts & desired_contacts.bool() & ~self.foot_completed_step
+        reward = tracking_error * valid_contacts.float()
+        
+        return reward.sum(dim=-1)
     
     # for base PPO encouraging x and y positive movement and same z (not falling into the void)
     def _reward_xy_progress(self):
@@ -1097,34 +1208,40 @@ class LeggedRobot(BaseTask):
         """Updates self.immediate_heightfield with height values in a 0.56m x 0.56m area around the robot, 
         sampled to a 14x14 grid"""
         # Physical dimensions desired
-        window_size_meters = 1.11  # 3m x 3m window (TODO: Adjust however much you want)
-        samples_per_side = 17      # 14 x 14 grid (TODO: adjust however much u want)
+        grid_cell_size = self.cell_size
+        samples_per_side = self.map_size      # 14 x 14 grid (TODO: adjust however much u want)
+        window_size_meters = grid_cell_size * (samples_per_side - 1)  # 3m x 3m window (TODO: Adjust however much you want)
+
         
         # Calculate sampling interval in meters
         sample_spacing = window_size_meters / (samples_per_side - 1)  # Distance between samples
         
         # Get robot's current position in world coordinates
-        base_pos = self.root_states[0, 0:3]  # Using first env's robot position
+        base_pos = self.root_states[:, 0:3]  # Using first env's robot position
         
         # Initialize the result grid
-        self.immediate_heightfield = np.zeros((samples_per_side, samples_per_side), dtype=np.int16)
-        
+        self.immediate_heightfields = torch.zeros((self.num_envs, samples_per_side, samples_per_side), dtype=torch.int16, device=self.device)
+
+        # Create meshgrid for sample positions
+        i, j = torch.meshgrid(torch.arange(samples_per_side, device=self.device), torch.arange(samples_per_side, device=self.device))
+
         # Calculate world coordinates for each sample point
-        for i in range(samples_per_side):
-            for j in range(samples_per_side):
-                # Calculate world position for this sample
-                # Center the window on the robot and offset by sample position
-                world_x = base_pos[0] + (i - samples_per_side/2) * sample_spacing
-                world_y = base_pos[1] + (j - samples_per_side/2) * sample_spacing
-                
-                # Convert world coordinates to heightfield indices
-                hf_row = int((world_x + self.terrain.cfg.border_size) / self.terrain.cfg.horizontal_scale)
-                hf_col = int((world_y + self.terrain.cfg.border_size) / self.terrain.cfg.horizontal_scale)
-                
-                # Check bounds and sample height
-                if (0 <= hf_row < self.terrain.height_field_raw.shape[0] and 
-                    0 <= hf_col < self.terrain.height_field_raw.shape[1]):
-                    self.immediate_heightfield[i, j] = self.terrain.height_field_raw[hf_row, hf_col]
+        world_x = base_pos[:, 0, None, None] + (i - samples_per_side/2) * sample_spacing
+        world_y = base_pos[:, 1, None, None] + (j - samples_per_side/2) * sample_spacing
+
+        # Convert world coordinates to heightfield indices
+        hf_row = torch.floor((world_x + self.terrain.cfg.border_size) / self.terrain.cfg.horizontal_scale).to(torch.int64)
+        hf_col = torch.floor((world_y + self.terrain.cfg.border_size) / self.terrain.cfg.horizontal_scale).to(torch.int64)
+
+        # Create mask for valid indices
+        valid_mask = (hf_row >= 0) & (hf_row < self.height_samples.shape[0]) & \
+                    (hf_col >= 0) & (hf_col < self.height_samples.shape[1])
+
+        # Sample heights using advanced indexing
+        hf_row = torch.clamp(hf_row, 0, self.height_samples.shape[0] - 1)
+        hf_col = torch.clamp(hf_col, 0, self.height_samples.shape[1] - 1)
+        self.immediate_heightfields = torch.where(valid_mask, self.height_samples[hf_row, hf_col], self.immediate_heightfields)
+        self.immediate_heightfields = self.immediate_heightfields * self.terrain.cfg.vertical_scale
 
     def _check_feet_at_target(self, feet_positions, target_positions, threshold=0.02):
         """

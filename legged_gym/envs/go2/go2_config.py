@@ -42,28 +42,28 @@ class GO2RoughCfg( LeggedRobotCfg ):
         soft_dof_pos_limit = 0.9
         base_height_target = 0.25
         class scales( LeggedRobotCfg.rewards.scales ):
-            # Negative rewards (penalties)
+            # Core task
+            foothold_tracking = 40.0    # Replace target_dists
+            
+            # Safety penalties
             torques = -0.0002
-            dof_pos_limits = -10.0
-            orientation = -2.0  # Penalize non-flat orientation
-            lin_vel_z = -2.0   # Penalize vertical movement
-            ang_vel_xy = -0.5  # Penalize angular velocity in xy plane
-            collision = -1.0   # Penalize collisions
+            dof_pos_limits = -10.0      # Keep strong joint limit penalty
+            orientation = -2.0          # Keep orientation penalty
             
-            # Positive rewards
-            forward_vel = 10.0  # Strong reward for moving forward
-            tracking_lin_vel = 1.0  # Reward for tracking commanded velocity
-            feet_air_time = 1.0  # Reward for taking steps
+            # Zero out velocity tracking
+            lin_vel_z = 0.0
+            ang_vel_xy = 0.0
+            tracking_lin_vel = 0.0
             
-            # Remove or reduce rewards that might conflict with forward movement
-            stand_still = 0.0  # Disable stand still reward
-
-            # TODO: uncomment this to activate foot-target-distance-based reward
-            target_dists = 40.0
-
-            # TODO: comment this (this is for base PPO rewards)
-            xy_progress = 10.0
-            z_stability = 4.0
+            # Safety
+            collision = -2.0           # Increase collision penalty
+            
+            # Zero out movement rewards since following optimizer
+            forward_vel = 0.0
+            feet_air_time = 0.0
+            stand_still = 0.0
+            xy_progress = 0.0
+            z_stability = 0.0
 
 class GO2RoughCfgPPO( LeggedRobotCfgPPO ):
     class algorithm( LeggedRobotCfgPPO.algorithm ):
@@ -75,5 +75,3 @@ class GO2RoughCfgPPO( LeggedRobotCfgPPO ):
         actor_hidden_dims = [512, 256, 128]  # Keep the hidden layers the same
         critic_hidden_dims = [512, 256, 128]  # Keep the hidden layers the same
         # The input layer will automatically adjust to match observation size
-
-  

@@ -3,7 +3,7 @@ from .base_config import BaseConfig
 class LeggedRobotCfg(BaseConfig):
     class env:
         num_envs = 4096
-        num_observations = 72  # Update this to match your actual observation size
+        num_observations = 164  # Update this to match your actual observation size
         num_privileged_obs = None # if not None a priviledge_obs_buf will be returned by step() (critic obs for assymetric training). None is returned otherwise 
         num_actions = 12
         env_spacing = 3.  # not used with heightfields/trimeshes 
@@ -110,21 +110,37 @@ class LeggedRobotCfg(BaseConfig):
 
     class rewards:
         class scales:
-            termination = -0.0
-            tracking_lin_vel = 1.0
-            tracking_ang_vel = 0.5
-            lin_vel_z = -2.0
-            ang_vel_xy = -0.05
-            orientation = -0.
-            torques = -0.00001
-            dof_vel = -0.
-            dof_acc = -2.5e-7
-            base_height = -0. 
-            feet_air_time =  1.0
-            collision = -1.
-            feet_stumble = -0.0 
-            action_rate = -0.01
-            stand_still = -0.
+            # Core task
+            foothold_tracking = 40.0    # New primary objective
+            
+            # Zero out velocity tracking since we follow footholds
+            tracking_lin_vel = 0.0
+            tracking_ang_vel = 0.0
+            
+            # Stability penalties
+            lin_vel_z = -2.0           # Keep from excessive vertical motion
+            ang_vel_xy = -0.5          # Limit angular velocity
+            orientation = -2.0          # Keep upright
+            
+            # Motion smoothness
+            torques = -0.00001         # Keep original small penalty
+            dof_vel = -0.0001          # Small penalty for smoothness
+            dof_acc = -2.5e-7          # Keep original
+            
+            # Zero out unused
+            base_height = 0.0 
+            feet_air_time = 0.0
+            
+            # Safety
+            collision = -2.0           # Increase collision penalty
+            stumble = -2.0        # Add stumble penalty
+            
+            # Movement smoothness
+            action_rate = -0.01        # Keep original
+            
+            # Zero out unused
+            stand_still = 0.0
+            termination = 0.0
 
         only_positive_rewards = True # if true negative total rewards are clipped at zero (avoids early termination problems)
         tracking_sigma = 0.25 # tracking reward = exp(-error^2/sigma)
@@ -213,7 +229,7 @@ class LeggedRobotCfgPPO(BaseConfig):
         policy_class_name = 'ActorCritic'
         algorithm_class_name = 'PPO'
         num_steps_per_env = 24 # per iteration
-        max_iterations = 1500 # number of policy updates
+        max_iterations = 500 # number of policy updates
 
         # logging
         save_interval = 50 # check for potential saves every this many iterations
