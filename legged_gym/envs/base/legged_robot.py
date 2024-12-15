@@ -62,14 +62,14 @@ class LeggedRobot(BaseTask):
 
         # this is the heightfield:
         heightfield = self.terrain.height_field_raw.astype(np.int16)
-        print(f"heightfield shape: {heightfield.shape}")
-        print(f"heightfield: {heightfield}")
-        print(f"sum heightfield: {np.sum(heightfield)}")
+        # print(f"heightfield shape: {heightfield.shape}")
+        # print(f"heightfield: {heightfield}")
+        # print(f"sum heightfield: {np.sum(heightfield)}")
 
         heights_in_meters = self.immediate_heightfield * self.terrain.cfg.vertical_scale
-        print(f"heights_in_meters shape: {heights_in_meters.shape}")
-        print(f"heights_in_meters: {heights_in_meters}")
-        print(f"sum heights_in_meters: {np.sum(heights_in_meters)}")
+        # print(f"heights_in_meters shape: {heights_in_meters.shape}")
+        # print(f"heights_in_meters: {heights_in_meters}")
+        # print(f"sum heights_in_meters: {np.sum(heights_in_meters)}")
         
         # The horizontal scale (distance between points) : (currently 0.1 m)
         # The vertical scale (height multiplier) : (currently 0.005 m)
@@ -216,15 +216,30 @@ class LeggedRobot(BaseTask):
     def compute_observations(self):
         """ Computes observations
         """
-        self.obs_buf = torch.cat((  self.base_lin_vel * self.obs_scales.lin_vel,
-                                    self.base_ang_vel  * self.obs_scales.ang_vel,
-                                    self.projected_gravity,
-                                    self.commands[:, :3] * self.commands_scale,
-                                    (self.dof_pos - self.default_dof_pos) * self.obs_scales.dof_pos,
-                                    self.dof_vel * self.obs_scales.dof_vel,
-                                    self.actions
-                                    ),dim=-1)
-        # add perceptive inputs if not blind
+        # Convert heightfield to tensor and handle batch dimension
+        heightfield_flat = self.immediate_heightfield.flatten()
+        heightfield_obs = torch.tensor(
+            heightfield_flat,
+            device=self.device,
+            dtype=torch.float32
+        )
+        # Expand to match batch dimension [196] -> [4096, 196]
+        heightfield_obs = heightfield_obs.unsqueeze(0).repeat(self.num_envs, 1)
+        
+        # Scale the heightfield values
+        heightfield_obs = heightfield_obs * self.cfg.terrain.vertical_scale
+
+        self.obs_buf = torch.cat((
+            self.base_lin_vel * self.obs_scales.lin_vel,
+            self.base_ang_vel * self.obs_scales.ang_vel,
+            self.projected_gravity,
+            self.commands[:, :3] * self.commands_scale,
+            (self.dof_pos - self.default_dof_pos) * self.obs_scales.dof_pos,
+            self.dof_vel * self.obs_scales.dof_vel,
+            self.actions,
+            heightfield_obs
+        ), dim=-1)
+
         # add noise if needed
         if self.add_noise:
             self.obs_buf += (2 * torch.rand_like(self.obs_buf) - 1) * self.noise_scale_vec
@@ -344,9 +359,9 @@ class LeggedRobot(BaseTask):
         # Update local heightfield window
         self._update_local_heightfield()
 
-        print(f"immediate_heightfield shape: {self.immediate_heightfield.shape}")
-        print(f"immediate_heightfield: {self.immediate_heightfield}")
-        print(f"sum immediate_heightfield: {np.sum(self.immediate_heightfield)}")
+        # print(f"immediate_heightfield shape: {self.immediate_heightfield.shape}")
+        # print(f"immediate_heightfield: {self.immediate_heightfield}")
+        # print(f"sum immediate_heightfield: {np.sum(self.immediate_heightfield)}")
 
     def _resample_commands(self, env_ids):
         """ Randommly select commands of some environments
